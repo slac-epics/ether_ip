@@ -18,6 +18,7 @@ ether_ip_test_SRCS += ether_ip_test.c
 ether_ip_test_LIBS += Com
 
 DBD = ether_ip.dbd
+DBD += drvEtherIP.dbd
 
 LIBRARY_IOC = ether_ip
 
