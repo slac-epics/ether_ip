@@ -1,4 +1,4 @@
-/* $Id: devEtherIP.c,v 1.20 2004/03/02 16:23:21 kasemir Exp $
+/* $Id: devEtherIP.c,v 1.1.1.1 2004/03/02 16:23:21 saa Exp $
  *
  * devEtherIP
  *
@@ -391,6 +391,7 @@ static void check_ao_callback(void *arg)
                         rec->udf = false;
                         break;
                     case menuConvertLINEAR:
+                    case menuConvertSLOPE:
                         dbl = dbl*rec->eslo + rec->eoff;
                         rec->val = rec->pval = dbl;
                         rec->udf = false;
@@ -954,7 +955,7 @@ static long ai_init_record(aiRecord *rec)
 {
     long status = init_record((dbCommon *)rec, scan_callback, &rec->inp, 1, 0);
     /* Make sure record processing routine does not perform any conversion*/
-    rec->linr = 0;
+    if (rec->linr != menuConvertSLOPE) rec->linr = 0;
     return status;
 }
 
