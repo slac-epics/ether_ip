@@ -1,4 +1,4 @@
-/* $Id: ether_ip.h,v 1.17 2003/10/31 21:34:23 kasemir Exp $
+/* $Id: ether_ip.h,v 1.20 2006/04/06 13:51:48 kasemir Exp $
  *
  * ether_ip
  *
@@ -159,16 +159,25 @@ void EIP_hexdump(int level, const void *_data, int len);
  * the _request_ reaches 538 bytes
  * -> request & response each limited to 538 bytes.
  *
- * These macros are the best guess for the buffer
- * plus the protocol overhead (encap. header).
- * EIP_BUFFER_LIMIT - EIP_PROTOCOL_OVERHEAD are used
+ * These macros used to be the best guess for the buffer
+ * plus the protocol overhead (encap. header), using
+ * 538 - EIP_PROTOCOL_OVERHEAD
  * to fit the Multi-Request.
  * The response has an overhead of 40 bytes, see above: 24+6+10.
  * The request has an overhead of 52 bytes.
  *
+ * Buffer code rejects requests > EIP_BUFFER_PANIC_THRESHOLD
+ * because that's not supposed to happen.
+ *
+ * However, the SNS CF PLCs seem to work best with a buffer limit
+ * of 500, so that's now the EIP_DEFAULT_BUFFER_LIMIT.
  */
-#define EIP_BUFFER_LIMIT 538
+#define EIP_DEFAULT_BUFFER_LIMIT 500
 #define EIP_PROTOCOL_OVERHEAD 52
+#define EIP_BUFFER_PANIC_THRESHOLD 600
+
+extern int EIP_buffer_limit;
+
 
 /********************************************************
  * ControlNet data types
@@ -611,7 +620,10 @@ typedef struct
     CN_UINT device_type;
     CN_UINT revision;
     CN_UDINT serial_number;
-    CN_USINT name[33];
+    /* Table 10.3 in spec limits string to 32 chars,
+     * but CompactLogix seems to return 52 characters.
+     */
+   CN_USINT name[100];
 } EIPIdentityInfo;
 
 /* Parameters & buffers for one EtherNet/IP connection.
