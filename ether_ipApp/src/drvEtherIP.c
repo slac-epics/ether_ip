@@ -1,11 +1,11 @@
-/* $Id: drvEtherIP.c,v 1.24 2004/03/17 22:42:36 kasemir Exp $
+/* $Id: drvEtherIP.c,v 1.35 2006/06/06 15:11:20 kasemir Exp $
  *
  * drvEtherIP
  *
  * IOC driver that uses ether_ip routines,
  * keeping lists of PLCs and tags and scanlists etc.
  *
- * kasemir@lanl.gov
+ * kasemirk@ornl.gov
  */
 
 /* System */
@@ -96,11 +96,11 @@ static void dump_TagInfo(const TagInfo *info, int level)
                (unsigned int)info->scanlist);
         EIP_copy_ParsedTag(buffer, info->tag);
         printf("  compiled tag        : '%s'\n", buffer);
-        printf("  elements            : %d\n", info->elements);
-        printf("  cip_r_request_size  : %d\n", info->cip_r_request_size);
-        printf("  cip_r_response_size : %d\n", info->cip_r_response_size);
-        printf("  cip_w_request_size  : %d\n", info->cip_w_request_size);
-        printf("  cip_w_response_size : %d\n", info->cip_w_response_size);
+        printf("  elements            : %u\n", (unsigned)info->elements);
+        printf("  cip_r_request_size  : %u\n", (unsigned)info->cip_r_request_size);
+        printf("  cip_r_response_size : %u\n", (unsigned)info->cip_r_response_size);
+        printf("  cip_w_request_size  : %u\n", (unsigned)info->cip_w_request_size);
+        printf("  cip_w_response_size : %u\n", (unsigned)info->cip_w_response_size);
         printf("  data_lock ID        : 0x%X\n",
                (unsigned int) info->data_lock);
     }
@@ -108,8 +108,8 @@ static void dump_TagInfo(const TagInfo *info, int level)
     {
         if (level > 3)
         {
-            printf("  data_size (buffer)  : %d\n",  info->data_size);
-            printf("  valid_data_size     : %d\n",  info->valid_data_size);
+            printf("  data_size (buffer)  : %u\n",  (unsigned)info->data_size);
+            printf("  valid_data_size     : %u\n",  (unsigned)info->valid_data_size);
             printf("  do_write            : %s\n",
                    (info->do_write ? "yes" : "no"));
             printf("  is_writing          : %s\n",
@@ -196,7 +196,8 @@ static void dump_ScanList(const ScanList *list, int level)
     printf("  Last scan     : %s\n", tsString);
     if (level > 4)
     {
-        printf("  Errors        : %u\n", list->list_errors);
+        printf("  Errors        : %u\n", (unsigned)list->list_errors);
+        printf("  Schedule Errs : %u\n", (unsigned)list->sched_errors);
         epicsTimeToStrftime(tsString, sizeof(tsString),
                             "%Y/%m/%d %H:%M:%S.%04f", &list->scheduled_time);
         printf("  Next scan     : %s\n", tsString);
@@ -220,6 +221,8 @@ static void reset_ScanList(ScanList *scanlist)
 {
     scanlist->enabled        = true;
     scanlist->list_errors    = 0;
+    scanlist->sched_errors   = 0;
+    memset(&scanlist->scan_time,      0, sizeof(epicsTimeStamp));
     memset(&scanlist->scheduled_time, 0, sizeof(epicsTimeStamp));
     scanlist->min_scan_time  = 0.0;
     scanlist->max_scan_time  = 0.0;
@@ -234,7 +237,6 @@ static ScanList *new_ScanList(PLC *plc, double period)
     DLL_init(&list->taginfos);
     list->plc = plc;
     list->period = period;
-    memset(&list->scan_time, 0, sizeof(epicsTimeStamp));
     reset_ScanList (list);
     return list;
 }
@@ -335,12 +337,15 @@ static eip_bool complete_PLC_ScanList_TagInfos(PLC *plc)
     ScanList       *list;
     TagInfo        *info;
     const CN_USINT *data;
-    eip_bool       any_ok = false;
+    size_t         tried = 0, succeeded = 0;
     size_t         type_and_data_len;
+
+    EIP_printf(5, "complete_PLC_ScanList_TagInfos PLC '%s':\n", plc->name);
 
     for (list=DLL_first(ScanList, &plc->scanlists);  list;
          list=DLL_next(ScanList, list))
     {
+        EIP_printf(5, "- Scanlist %.2f\n", list->period);
         for (info=DLL_first(TagInfo, &list->taginfos);  info;
              info=DLL_next(TagInfo, info))
         {
@@ -350,50 +355,56 @@ static eip_bool complete_PLC_ScanList_TagInfos(PLC *plc)
                            info->string_tag);
                 continue;
             }
-            if (info->cip_r_request_size==0)
-            {   /* Need to get the read sizes */
-                data = EIP_read_tag(&plc->connection,
-                                    info->tag, info->elements,
-                                    NULL /* data_size */,
-                                    &info->cip_r_request_size,
-                                    &info->cip_r_response_size);
-                if (data)
+            /* Need to get the read sizes */
+            ++tried;
+            data = EIP_read_tag(&plc->connection,
+                                info->tag, info->elements,
+                                NULL /* data_size */,
+                                &info->cip_r_request_size,
+                                &info->cip_r_response_size);
+            if (data)
+            {
+                EIP_printf(5, "  tag '%s': req %d, resp %d bytes\n",
+                           info->string_tag, info->cip_r_request_size, info->cip_r_response_size);
+                ++succeeded;
+                /* Estimate write sizes from the request/response for read
+                 * because we don't want to issue a 'write' just for the
+                 * heck of it.
+                 * Nevertheless, the write sizes calculated in here
+                 * should be exact since we can determine the write
+                 * request package from the read request
+                 * (CIP service code, tag name, elements)
+                 * plus the raw data size.
+                 */
+                if (info->cip_r_response_size <= 4)
                 {
-                    any_ok = true;
-                    /* Estimate write sizes from the request/response for read
-                     * because we don't want to issue a 'write' just for the
-                     * heck of it.
-                     * Nevertheless, the write sizes calculated in here
-                     * should be exact since we can determine the write
-                     * request package from the read request
-                     * (CIP service code, tag name, elements)
-                     * plus the raw data size.
-                     */
-                    if (info->cip_r_response_size <= 4)
-                    {
-                        info->cip_w_request_size  = 0;
-                        info->cip_w_response_size = 0;
-                    }
-                    else
-                    {
-                        type_and_data_len = info->cip_r_response_size - 4;
-                        info->cip_w_request_size  = info->cip_r_request_size
-                            + type_and_data_len;
-                        info->cip_w_response_size = 4;
-                    }
-                }
-                else
-                {
-                    info->cip_r_request_size  = 0;
-                    info->cip_r_response_size = 0;
                     info->cip_w_request_size  = 0;
                     info->cip_w_response_size = 0;
                 }
+                else
+                {
+                    type_and_data_len = info->cip_r_response_size - 4;
+                    info->cip_w_request_size  = info->cip_r_request_size
+                        + type_and_data_len;
+                    info->cip_w_response_size = 4;
+                }
+            }
+            else
+            {
+                EIP_printf(3, "tag '%s': Cannot read!\n", info->string_tag);
+                info->cip_r_request_size  = 0;
+                info->cip_r_response_size = 0;
+                info->cip_w_request_size  = 0;
+                info->cip_w_response_size = 0;
             }
             epicsMutexUnlock(info->data_lock);
         }
     }
-    return any_ok;
+    EIP_printf(5, "complete_PLC_ScanList_TagInfos PLC '%s': tried %lu tags, got %lu tags\n",
+               plc->name, (unsigned long)tried, (unsigned long)succeeded);
+    /* OK if we got at least one answer,
+     * or we never really tried to get any tag */
+    return (succeeded > 0) || (tried == 0);
 }
 
 static void invalidate_PLC_tags(PLC *plc)
@@ -422,16 +433,6 @@ static void invalidate_PLC_tags(PLC *plc)
     }
 }
 
-/* Test if we are connected, if not try to connect to PLC */
-static eip_bool assert_PLC_connect(PLC *plc)
-{
-    if (plc->connection.sock)
-        return true;
-    return EIP_startup(&plc->connection, plc->ip_addr,
-                       ETHERIP_PORT, plc->slot, ETHERIP_TIMEOUT)
-        && complete_PLC_ScanList_TagInfos(plc);
-}
-
 static void disconnect_PLC(PLC *plc)
 {
     if (plc->connection.sock)
@@ -439,6 +440,22 @@ static void disconnect_PLC(PLC *plc)
         EIP_shutdown(&plc->connection);
         invalidate_PLC_tags(plc);
     }
+}   
+
+/* Test if we are connected, if not try to connect to PLC */
+static eip_bool assert_PLC_connect(PLC *plc)
+{
+    if (plc->connection.sock)
+        return true;
+    if (! EIP_startup(&plc->connection, plc->ip_addr,
+                      ETHERIP_PORT, plc->slot, ETHERIP_TIMEOUT))
+        return false;
+    if (! complete_PLC_ScanList_TagInfos(plc))
+    {
+        disconnect_PLC(plc);
+        return false;
+    }
+    return true;
 }
 
 /* Given a transfer buffer limit,
@@ -466,6 +483,8 @@ static size_t determine_MultiRequest_count(size_t limit,
      * Skip entries with empty cip_*_request_size!
      */
     count = *requests_size = *responses_size = 0;
+    EIP_printf(8, "EIP determine_MultiRequest_count, limit %lu\n",
+               (unsigned long) limit);
     for (/**/; info; info = DLL_next(TagInfo, info))
     {
         if (info->cip_r_request_size <= 0)
@@ -481,11 +500,19 @@ static size_t determine_MultiRequest_count(size_t limit,
             info->is_writing = true;
             try_req  = *requests_size  + info->cip_w_request_size;
             try_resp = *responses_size + info->cip_w_response_size;
+            EIP_printf(8, "tag %lu '%s' (write): %lu, %lu ?\n",
+                       (unsigned long)count, info->string_tag,
+                       (unsigned long)info->cip_w_request_size,
+                       (unsigned long)info->cip_w_response_size);
         }
         else
         {
             try_req  = *requests_size  + info->cip_r_request_size;
             try_resp = *responses_size + info->cip_r_response_size;
+            EIP_printf(8, "tag %lu '%s' (read): %lu, %lu ?\n",
+                       (unsigned long)count, info->string_tag,
+                       (unsigned long)info->cip_r_request_size,
+                       (unsigned long)info->cip_r_response_size);
         }
         epicsMutexUnlock(info->data_lock);
         *multi_request_size  = CIP_MultiRequest_size (count+1, try_req);
@@ -493,14 +520,31 @@ static size_t determine_MultiRequest_count(size_t limit,
         if (*multi_request_size  > limit ||
             *multi_response_size > limit)
         {   /* more won't fit */
+            if (count <= 0)
+            {   /* The one and only tag didn't fit?! */
+                EIP_printf(2, "Tag '%s' exceeds buffer limit of %lu bytes,\n",
+                           info->string_tag, (unsigned long) limit);
+                EIP_printf(3, " Request   size: %10lu bytes\n", (unsigned long)try_req);
+                EIP_printf(3, " Response  size: %10lu bytes\n", (unsigned long)try_resp);
+                EIP_printf(3, " Total  request: %10lu bytes\n",
+                           (unsigned long)*multi_request_size);
+                EIP_printf(3, " Total response: %10lu bytes\n",
+                           (unsigned long)*multi_response_size);
+            }
             *multi_request_size =CIP_MultiRequest_size (count,*requests_size);
             *multi_response_size=CIP_MultiResponse_size(count,*responses_size);
+            EIP_printf(8, "reached buffer limit at req/resp: %lu, %lu\n",
+                       (unsigned long)*multi_request_size,
+                       (unsigned long)*multi_response_size);
             return count;
         }
         ++count; /* ok, include another request */
         *requests_size  = try_req;
         *responses_size = try_resp;
     }
+    EIP_printf(8, "End of list, total req/resp: %lu, %lu\n",
+               (unsigned long)*multi_request_size,
+               (unsigned long)*multi_response_size);
     return count;
 }
 
@@ -527,6 +571,7 @@ static eip_bool process_ScanList(EIPConnection *c, ScanList *scanlist)
     TagCallback         *cb;
     eip_bool            ok;
 
+    EIP_printf(10, "EIP process_ScanList %g s\n", scanlist->period);
     info = DLL_first(TagInfo, &scanlist->taginfos);
     while (info)
     {   /* keep position, we'll loop several times:
@@ -536,10 +581,12 @@ static eip_bool process_ScanList(EIPConnection *c, ScanList *scanlist)
          */
         info_position = info;
         count = determine_MultiRequest_count(
-            c->transfer_buffer_limit - EIP_PROTOCOL_OVERHEAD,
+            c->transfer_buffer_limit,
             info, &requests_size, &responses_size,
             &multi_request_size, &multi_response_size);
-        if (count == 0)
+        EIP_printf(10, "EIP process_ScanList %lu items\n",
+                   (unsigned long)count);
+        if (count == 0) /* Empty, or nothing fits in one request. */
             return true;
         /* send <count> requests as one transfer */
         send_size = CM_Unconnected_Send_size(multi_request_size);
@@ -706,9 +753,7 @@ static void PLC_scan_task(PLC *plc)
     eip_bool          transfer_ok, reset_next_schedule;
     
     quantum = epicsThreadSleepQuantum();
-    timeout = (double)plc->connection.millisec_timeout / 1000.0;
-    if (timeout < EIP_MIN_CONN_TIMEOUT)
-        timeout = EIP_MIN_CONN_TIMEOUT;    
+    timeout = (double)ETHERIP_TIMEOUT/1000.0;
   scan_loop: /* --------- The Scan Loop for one PLC -------- */
     if (epicsMutexLock(plc->lock) != epicsMutexLockOK)
     {
@@ -723,6 +768,7 @@ static void PLC_scan_task(PLC *plc)
         epicsThreadSleep(timeout);
         goto scan_loop;
     }
+    EIP_printf(10, "drvEtherIP scan PLC '%s'\n", plc->name);
     reset_next_schedule = true;
     epicsTimeGetCurrent(&start_time);
     for (list = DLL_first(ScanList,&plc->scanlists);
@@ -775,6 +821,28 @@ static void PLC_scan_task(PLC *plc)
     {  
         epicsTimeGetCurrent(&start_time);
         delay = epicsTimeDiffInSeconds(&next_schedule, &start_time);
+        if (delay > 60.0)
+        {
+            char      tsString[50];
+            printf("Scanlist %g secs has scheduling problem, delay = %g sec\n",
+                  list->period, delay);
+            epicsTimeToStrftime(tsString, sizeof(tsString),
+                                "%Y/%m/%d %H:%M:%S.%04f", &list->scan_time);
+            printf("  'Scan time'    : %s\n", tsString);
+            epicsTimeToStrftime(tsString, sizeof(tsString),
+                                "%Y/%m/%d %H:%M:%S.%04f", &start_time);
+            printf("  'Current time' : %s\n", tsString);
+            epicsTimeToStrftime(tsString, sizeof(tsString),
+                                "%Y/%m/%d %H:%M:%S.%04f", &next_schedule);
+            printf("  'Next    time' : %s\n", tsString);
+            /* Attempt to hack around this by waiting a minute,
+             * hoping that the clock looks better by then.
+             * Also resetting the scheduled time to 'now'.
+             */
+            delay = 60.0;
+            list->scheduled_time = start_time;
+            ++list->sched_errors;
+        }
     }    
     /* Sleep until next turn. */
     if (delay > 0.0)
@@ -870,6 +938,9 @@ void drvEtherIP_help()
     printf("    double drvEtherIP_default_rate = <seconds>\n");
     printf("    -  define the default scan rate\n");
     printf("       (if neither SCAN nor INP/OUT provide one)\n");
+    printf("    int EIP_buffer_limit = <bytes>\n");
+    printf("    -  define the buffer limit. Default: %d\n", EIP_DEFAULT_BUFFER_LIMIT);
+    printf("       The actual PLC limit is unknown, it might depend on the PLC or ENET model.\n");
     printf("    drvEtherIP_define_PLC <name>, <ip_addr>, <slot>\n");
     printf("    -  define a PLC name (used by EPICS records) as IP\n");
     printf("       (DNS name or dot-notation) and slot (0...)\n");
@@ -896,7 +967,6 @@ long drvEtherIP_report(int level)
     PLC *plc;
     EIPIdentityInfo *ident;
     ScanList *list;
-    eip_bool have_drvlock, have_PLClock;
     epicsTimeStamp now;
     char tsString[50];
 
@@ -916,9 +986,6 @@ long drvEtherIP_report(int level)
     if (level > 1)
         printf("  Mutex lock: 0x%X\n",
                (unsigned int) drvEtherIP_private.lock);
-    have_drvlock = epicsMutexLock(drvEtherIP_private.lock) == epicsMutexLockOK;
-    if (! have_drvlock)
-        printf("   CANNOT GET DRIVER'S LOCK!\n");
     for (plc = DLL_first(PLC,&drvEtherIP_private.PLCs);
          plc;  plc = DLL_next(PLC,plc))
     {
@@ -933,8 +1000,8 @@ long drvEtherIP_report(int level)
             printf("  Interface serial      : 0x%X\n",
                    (unsigned)ident->serial_number);
             
-            printf("  scan thread slow count: %u\n", plc->slow_scans);
-            printf("  connection errors     : %u\n", plc->plc_errors);
+            printf("  scan thread slow count: %u\n", (unsigned)plc->slow_scans);
+            printf("  connection errors     : %u\n", (unsigned)plc->plc_errors);
         }
         if (level > 2)
         {
@@ -953,9 +1020,6 @@ long drvEtherIP_report(int level)
             epicsTimeToStrftime(tsString, sizeof(tsString),
                                 "%Y/%m/%d %H:%M:%S.%04f", &now); 
             printf("  Now                   : %s\n", tsString);
-            have_PLClock = epicsMutexLock(plc->lock) == epicsMutexLockOK;
-            if (! have_PLClock)
-                printf("   CANNOT GET PLC'S LOCK!\n");
             if (level > 3)
             {
                 printf("** ");
@@ -970,12 +1034,8 @@ long drvEtherIP_report(int level)
                     dump_ScanList(list, level);
                 }
             }
-            if (have_PLClock)
-                epicsMutexUnlock(plc->lock);
         }
     }
-    if (have_drvlock)
-        epicsMutexUnlock(drvEtherIP_private.lock);
     printf("\n");
     return 0;
 }
@@ -1000,7 +1060,7 @@ void drvEtherIP_dump ()
             {
                 EIP_printf(0, "%s ", info->string_tag);
                 epicsMutexLock(info->data_lock);
-                if (info->valid_data_size >= 0)
+                if (info->valid_data_size > 0)
                     dump_raw_CIP_data(info->data, info->elements);
                 else
                     printf(" - no data -\n");
