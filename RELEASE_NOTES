@@ -1,0 +1,18 @@
+#==============================================================
+#
+#  Name: RELEASE_NOTES
+#
+#  Rem:  This file contains the release notes for ether_ip as
+#        pertains to the LCLS release format and procedures.
+#
+#
+#  Auth: 03-Jul-2007, A. Alarcon         (ALARCON)
+#  Rev:  dd-mmm-yyyy, Reviewer's Name    (USERNAME)
+#--------------------------------------------------------------
+#  Mod:
+#        dd-mmm-yyyy, First Lastname      (USERNAME)
+#          comment
+#
+#==============================================================
+#
+ether_ip-R1-0-0: Initial release used in LCLS Injector and BC1.
