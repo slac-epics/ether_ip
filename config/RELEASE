@@ -8,6 +8,5 @@
 #       within those definitions.
 #
 # Add your declarations here
+include $(TOP)/../../configure/RELEASE-base
 
-EPICS_BASE=$(EPICS_BASE_RELEASE)
-ETHER_IP=$(SHARE_RELEASE)/ether_ip/ether_ip-2-14
