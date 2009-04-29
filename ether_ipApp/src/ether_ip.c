@@ -1,4 +1,4 @@
-/* $Id: ether_ip.c,v 1.19 2004/03/17 20:59:03 kasemir Exp $
+/* $Id: ether_ip.c,v 1.28 2006/04/06 16:38:37 kasemir Exp $
  *
  * ether_ip
  *
@@ -24,6 +24,8 @@
 #include<memory.h>
 #endif
 #include"mem_string_file.h"
+
+int EIP_buffer_limit =  EIP_DEFAULT_BUFFER_LIMIT;
 
 static const CN_UINT __endian_test = 0x0001;
 #define is_little_endian (*((const CN_USINT*)&__endian_test))
@@ -328,18 +330,24 @@ static void append_tag(ParsedTag **tl, ParsedTag *node)
 }
 
 /* Turn tag string into ParsedTag-list */
+#undef DEBUG_PARSE
 ParsedTag *EIP_parse_tag(const char *tag)
 {
     ParsedTag *tl = 0;  /* Tag list, initially empty */
     ParsedTag *node;
     size_t len;
 
+#ifdef DEBUG_PARSE
+    printf("Parsing '%s'\n", tag);
+#endif
     while (tag)
     {
         len = strcspn(tag, ".[");
+#ifdef DEBUG_PARSE
+        printf("- Sub-tag of len %d\n", (int)len);
+#endif
         if (len <= 0)
             break;
-
         node = calloc(sizeof(ParsedTag), 1);
         if (! node)
             return 0;
@@ -347,7 +355,9 @@ ParsedTag *EIP_parse_tag(const char *tag)
         if (! EIP_strdup(&node->value.name, tag, len))
             return 0;
         append_tag(&tl, node);
-
+#ifdef DEBUG_PARSE
+    printf("  '%s'\n", node->value.name);
+#endif
         switch (tag[len])
         {
         case '\0':
@@ -363,10 +373,15 @@ ParsedTag *EIP_parse_tag(const char *tag)
             node->value.element = atol(tag+len+1);
             append_tag(&tl, node);
             tag = strchr(tag+len+1, ']');
-            if (tag)
-                ++tag;
-            else
+            if (!tag) /* Bad, no closing ']' */
                 return 0;
+            ++tag;
+            if (*tag == '.') /* Handle '.' in xxxx[3].subelement */
+                ++tag;
+#ifdef DEBUG_PARSE
+            printf("  array element %d, left: '%s'\n",
+                   (int)node->value.element, tag);
+#endif
             break;
         }
     }
@@ -390,7 +405,8 @@ void EIP_copy_ParsedTag(char *buffer, const ParsedTag *tag)
                 buffer += len;
                 break;
             case te_element:
-                buffer += sprintf(buffer, "[%d]", tag->value.element);
+                buffer += sprintf(buffer, "[%u]",
+                                  (unsigned int)tag->value.element);
                 break;
         }
         tag = tag->next;
@@ -1532,10 +1548,10 @@ void EIP_dump_connection (const EIPConnection *c)
 {
     printf ("EIPConnection:\n");
     printf ("    SOCKET          : %d\n", c->sock);
-    printf ("    buffer_limit    : %d\n", c->transfer_buffer_limit);
-    printf ("    millisec_timeout: %d\n", c->millisec_timeout);
+    printf ("    buffer_limit    : %u\n", (unsigned int)c->transfer_buffer_limit);
+    printf ("    millisec_timeout: %u\n", (unsigned int)c->millisec_timeout);
     printf ("    CN_UDINT session: 0x%08lX\n", c->session);
-    printf ("    buffer size     : %d\n", c->size);
+    printf ("    buffer size     : %u\n", (unsigned int)c->size);
     printf ("    buffer location : 0x%08lX\n", (unsigned long)c->buffer);
 }
 
@@ -1612,7 +1628,7 @@ static eip_bool EIP_init_and_connect (EIPConnection *c,
     int flag = true;
                 
     memset (c, 0, sizeof (EIPConnection));
-    c->transfer_buffer_limit = EIP_BUFFER_LIMIT;
+    c->transfer_buffer_limit = EIP_buffer_limit;
     c->millisec_timeout = millisec_timeout;
     c->sock = 0;
     c->slot = slot;
@@ -1628,7 +1644,7 @@ static eip_bool EIP_init_and_connect (EIPConnection *c,
 #else
     addr_p =(unsigned long *) &addr.sin_addr.s_addr;
 #endif
-    *addr_p = inet_addr (ip_addr);
+    *addr_p = inet_addr((char *)ip_addr);
     if (*addr_p == -1)
     {   /* ... or DNS */
         *addr_p = hostGetByName ((char *)ip_addr);
@@ -1654,6 +1670,11 @@ static eip_bool EIP_init_and_connect (EIPConnection *c,
         socket_close(c->sock);
         c->sock = 0;
         return false;
+    }
+    if (EIP_verbosity >= 10)
+    {
+        EIP_printf(10, "EIP connectWithTimeout(%s:0x%04X, %d sec, %d msec)\n",
+                   ip_addr, port, (int)timeout.tv_sec, (int)timeout.tv_usec);
     }
     if (connectWithTimeout(c->sock, (struct sockaddr *)&addr,
                            sizeof (addr), &timeout) != 0)
@@ -1684,6 +1705,12 @@ eip_bool EIP_reserve_buffer (void **buffer, size_t *size, size_t requested)
     void *old_buffer;
     int  old_size;
 
+    if (requested >= EIP_BUFFER_PANIC_THRESHOLD)
+    {
+        EIP_printf(1, "EIP_reserve_buffer refuses to allocate %d bytes\n",
+                   requested);
+        return false;
+    }
     if (*size >= requested)
         return true;
 
@@ -2209,9 +2236,11 @@ static eip_bool EIP_check_interface(EIPConnection *c)
         info->serial_number = *((CN_UDINT *) data);
     else return false;
     data = EIP_Get_Attribute_Single(c, C_Identity, 1, 7, &len);
-    if (data && len > 0 && len < 34)
+    if (data && len > 0)
     {
         len = *((CN_USINT *) data);
+        if (len >= sizeof(info->name))
+            return false;
         memcpy(info->name, (const char *)data+1, len);
         info->name[len] = '\0';
     }
