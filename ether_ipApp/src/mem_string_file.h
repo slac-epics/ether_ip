@@ -1,4 +1,4 @@
-/* $Id: mem_string_file.h,v 1.2 2003/04/29 21:49:54 kasemir Exp $
+/* $Id: mem_string_file.h,v 1.3 2007/04/16 20:57:18 kasemir Exp $
  *
  * mem_string_file
  *
@@ -30,12 +30,6 @@
 #include<stdarg.h>
 #include<string.h>
 #include<stdio.h>
-
-typedef int bool;
-#ifndef true
-#define true 1
-#define false 0
-#endif
 
 /*
  * Default size of buffer.
