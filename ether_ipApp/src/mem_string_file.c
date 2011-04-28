@@ -1,4 +1,4 @@
-/* $Id: mem_string_file.c,v 1.3 2004/03/02 16:23:21 kasemir Exp $
+/* $Id: mem_string_file.c,v 1.4 2007/04/16 20:57:18 kasemir Exp $
  *
  * mem_string_file
  *
@@ -20,7 +20,8 @@
  */
 
 #include "R314Compat.h"
-#include"mem_string_file.h"
+#include "mem_string_file.h"
+#include "eip_bool.h"
 
 epicsMutexId msfLock = 0;
 size_t msfInitialBufferSize = 2*1024*1024;
@@ -38,7 +39,7 @@ size_t msfBufferSize = 0;
 char *msfHead = 0;
 char *msfTail = 0;
 
-static bool msfInit()
+static eip_bool msfInit()
 {
     if (msfBuffer)
         return true;
