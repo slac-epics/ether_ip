@@ -1,4 +1,4 @@
-/* $Id: devEtherIP.c,v 1.20 2004/03/02 16:23:21 kasemir Exp $
+/* $Id: devEtherIP.c,v 1.22 2006/06/06 17:27:33 kasemir Exp $
  *
  * devEtherIP
  *
@@ -122,7 +122,7 @@ static void dump_DevicePrivate(const dbCommon *rec)
     printf("   link_text  : '%s'\n",  pvt->link_text);
     printf("   PLC_name   : '%s'\n",  pvt->PLC_name);
     printf("   string_tag : '%s', element %d\n",
-           pvt->string_tag, pvt->element);
+           pvt->string_tag, (int)pvt->element);
     printf("   mask       : 0x%08X    spec. opts.: %d\n",
            (unsigned int)pvt->mask, pvt->special);
     printf("   plc        : 0x%08X    tag        : 0x%08X\n",
@@ -189,7 +189,7 @@ static eip_bool get_bits(dbCommon *rec, size_t bits, unsigned long *rval)
     if (!get_CIP_UDINT(pvt->tag->data, element, &value))
     {
         errlogPrintf("EIP get_bits(%s), element %d failed\n",
-                     rec->name, element);
+                     rec->name, (int)element);
         return false;
     }
     /* Fetch bits from BOOL array.
@@ -206,7 +206,7 @@ static eip_bool get_bits(dbCommon *rec, size_t bits, unsigned long *rval)
             if (!get_CIP_UDINT(pvt->tag->data, element, &value))
             {
                 errlogPrintf("EIP get_bits(%s), element %d failed\n",
-                       rec->name, element);
+                       rec->name, (int)element);
                 return false;
             }
         }
@@ -226,7 +226,7 @@ static eip_bool put_bits(dbCommon *rec, size_t bits, unsigned long rval)
     if (! get_CIP_UDINT(pvt->tag->data, element, &value))
     {
         errlogPrintf("EIP put_bits(%s), element %d failed\n",
-                     rec->name, element);
+                     rec->name, (int)element);
         return false;
     }
     /* Transfer bits into BOOL array.
@@ -244,7 +244,7 @@ static eip_bool put_bits(dbCommon *rec, size_t bits, unsigned long rval)
             if (! put_CIP_UDINT(pvt->tag->data, element, value))
             {
                 errlogPrintf("EIP put_bits(%s), element %d failed\n",
-                             rec->name, element);
+                             rec->name, (int)element);
                 return false;
             }
             mask = 1; /* reset mask, go to next element */
@@ -252,7 +252,7 @@ static eip_bool put_bits(dbCommon *rec, size_t bits, unsigned long rval)
             if (! get_CIP_UDINT(pvt->tag->data, element, &value))
             {
                 errlogPrintf("EIP put_bits(%s), element %d failed\n",
-                             rec->name, element);
+                             rec->name, (int)element);
                 return false;
             }
         }
@@ -264,7 +264,7 @@ static eip_bool put_bits(dbCommon *rec, size_t bits, unsigned long rval)
     if (!put_CIP_UDINT(pvt->tag->data, element, value))
     {
         errlogPrintf("EIP put_bits(%s), element %d failed\n",
-                     rec->name, element);
+                     rec->name, (int)element);
         return false;
     }
     
@@ -391,6 +391,7 @@ static void check_ao_callback(void *arg)
                         rec->udf = false;
                         break;
                     case menuConvertLINEAR:
+                    case menuConvertSLOPE:
                         dbl = dbl*rec->eslo + rec->eoff;
                         rec->val = rec->pval = dbl;
                         rec->udf = false;
@@ -954,7 +955,8 @@ static long ai_init_record(aiRecord *rec)
 {
     long status = init_record((dbCommon *)rec, scan_callback, &rec->inp, 1, 0);
     /* Make sure record processing routine does not perform any conversion*/
-    rec->linr = 0;
+    if (rec->linr != menuConvertSLOPE)
+        rec->linr = 0;
     return status;
 }
 
