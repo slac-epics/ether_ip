@@ -7,6 +7,250 @@ in ether_ipApp/src/drvEtherIP.h are updated accordingly,
 so that you can see the current version at runtime via
 drvEtherIP_report.
 
+* 2007, July 19 ether_ip-2-16_3-14-9
+R3.14.9
+
+* 2007, 04/16
+Pulled better #define setup for bool/true/false
+as suggested by Andrew Johnson into eip_bool.h
+
+* 2006, 10/20 ether_ip-2-16
+Basic 'connection failed' info now also goes to error log.
+
+* 2006, 06/06 V2.15
+The code for determining the multi-request-count
+had a bug: When a scan list had too many entries,
+it wouldn't work at all (tags remain with "- no data -").
+
+Some more info on the buffer limit, EIP_buffer_limit:
+The default is 500, which seems to work in most cases,
+but the exact size is unknown.
+You can only change EIP_buffer_limit in the startup file
+_before_any_other_EIP_routine is called!
+It applies to both the request and the response data packages.
+The driver will only assemble requests which are sized below
+the buffer limit, and whose expected reply (data) is also below
+the buffer limit.
+These are possible errors and what to do about them.
+You might have to set EIP_verbosity high enough to see the errors.
+
+1) Request failed, ... "Buffer too small, partial data only"
+This is an error message from the PLC. The PLC tried to return data
+for a request, but couldn't, because the PLC's buffer is too small.
+--> decrease EIP_buffer_limit, because the response needs to be
+    made smaller.
+
+2) Request failed, ... "Service not supported" or other error.
+Also an error from the PLC. Might mean that the request was too big,
+so the PLC didn't understand the request at all, returning some
+error.
+--> decrease EIP_buffer_limit, so that the driver will send smaller requests.
+
+3) "Tag 'xyz' exceeds buffer limit of ... bytes"
+An error from the driver. The single tag 'xyz' has either a request size
+(basically: tag name length) or a response size (basically: data size)
+that exceeds the buffer limit.
+The driver won't even try to send that request to the PLC.
+--> increase EIP_buffer_limit, so that the driver will try.
+    If you then run into errors 1 or 2, you're out of luck.
+    The tag's name (unlikely) or the tag's data (probably) are too big,
+    so you have to use fewer array elements in the tag,
+    rearrange the data on the PLC to reside in several tags.
+
+4) "EIP_reserve_buffer refuses to allocate ... bytes"
+An error from the driver. We know that the actual PLC buffer limit
+is around 500, so the driver has a hard limit of 600 which you
+cannot exceed. If you set EIP_buffer_limit to >600,
+the driver will give this error message.
+Could also be caused by a faulty PLC response:
+A packet returned from the PLC that claims to contain >600 bytes
+of data. Instead of running out of memory, the driver will reject
+such responses and disconnect/reconnect.
+
+* 2006, 04/06 V2.14
+Minor tweak to allow longer product name in Identity,
+since Compact Logix then seems to work ok.
+
+* 2006, 03/10
+The error message about hitting the buffer limit is now
+more verbose (at EIP_verbosity 3  or higher) to help
+with finding the culprit:
+
+Assume this output from drvEtherIP_report:
+...
+*** Tag 'P1R0' @ 0x8054278:
+  scanlist            : 0x8054220
+  compiled tag        : 'P1R0'
+  elements            : 4
+  cip_r_request_size  : 10
+  cip_r_response_size : 22
+  cip_w_request_size  : 28
+  cip_w_response_size : 4
+  data_lock ID        : 0x8054320
+  data_size (buffer)  : 0
+  valid_data_size     : 0
+  do_write            : no
+  is_writing          : no
+  data                : -no data-
+  transfer time       : 0 secs
+...
+and 
+   EIP_buffer_limit=20
+in the startup file, you'll get the following error message:
+
+Tag 'P1R0' exceeds buffer limit of 20 bytes,
+ Request   size:         10 bytes
+ Response  size:         22 bytes
+ Total  request:         20 bytes
+ Total response:         30 bytes
+
+Meaning:
+The request, something like "CIP read 'P1R0'",
+takes 10 bytes. That's OK.
+Wrapped with what's necessary so send it,
+it turns into 20 bytes. Still OK.
+But the raw data that we expect back would be 22 bytes,
+resulting in a total response packet size of 30 bytes.
+Not OK when we assume that 20 bytes is the limit.
+
+* 2006, 02/07  V2.13
+The PLC or the ENET module or both have a buffer limit.
+Comments in ether_ipApp/src/ether_ip.h give some details
+on the difficulty in finding the exact limit.
+When the the driver tries to read too much data at a time,
+it run into "status 0x06 (Buffer too small, partial data only)"
+errors from the PLC.
+Then the limit is set too small, one cannot read arrays
+that hit the limit.
+I thought I had determined the exact limit via read and write
+tests on a PLC back in October 2002.
+Now, the update of the SNS CF IOCs shows that this value
+is wrong, at least for the CF PLCs or ENET modules.
+
+Changes:
+1) A message that indicates when the driver hits the limit
+and refuses to read or write.
+Before, you simply had INVALID records with no idea why.
+
+2) A new EIP_buffer_limit configuration value,
+defaulting to 500 because that worked for the CF IOCs.
+The previous default was 538-52 = 486.
+
+* 2005, 12/13  V2.12
+Fix for the case where the IOC might not fully reconnect
+after a PLC was reprogrammed.
+With EIP_verbosity=10, one could see that the driver
+would reconnect:
+
+  EIP connectWithTimeout(my_plc:0xAF12, 5 sec, 0 msec)
+  EIP connected to rfq-mod-plc:0xAF12 on socket 52
+  EIP sending ListServices encapsulation command
+  ....
+and successfully gather some information,
+  ------------------------------
+  Identity information of target:
+      UINT vendor         = 0x0100
+  ....
+      USINT name          = '1756-ENET/B '
+  ------------------------------
+but then immediately disconnect:
+  EIP sending UnRegisterSession encapsulation command, session ID 0x0202F900
+  ....
+  EIP disconnecting socket 52
+  drvEtherIP: PLC 'mod' is disconnected
+
+The fault was in the routine which initially reads
+every tag via a new connection in order to obtain
+the data sizes.
+
+In addition, drvEtherIP_report no longer locks
+anything. So it might print nonsense values in very
+rare cases, but to me that beats hanging when
+one tries to debug a driver thread.
+
+Eliminated a vxWorks compiler warning about inet_addr(),
+where the VXW lack the 'const' that Linux uses.
+
+* 2005, 09/26  V2.11
+In case of communication errors during an initial 'read'
+of all tags, the network socket might have been left open.
+
+* 2005, 04/19  V2.10
+EIP_verbosity>=10 will now print a message for the initial 'connect'
+call, which might help debug a situation where the driver
+cannot connect: You should now see a difference between a connection
+timeout (network problem, device not there) and a refused connection
+(possibly the wrong IP address).
+
+Change to AI record support:
+Before, no conversion via LINR was supported.
+In fact the device support code forced LINR=NO CONVERSION.
+From now on, LINR==SLOPE is allowed,
+in which case you configure the record's ESLO and EOFF
+fields, and the record will then perform a linear conversion
+from the RVAL field to the VAL field:
+              VAL = (RVAL * ESLO) + EOFF
+
+Similarly, the AO record will convert VAL to RVAL:
+            RVAL = (VAL - EOFF) / ESLO
+
+Note, however, that this only makes sense for records that
+are communicating with tags of type other than REAL.
+Only tags of type INT, DINT, ... will be read into the RVAL
+field (AI records) or be written from the RVAL field (AO recs).
+Tags of type REAL are directly read into respectively written
+from the VAL field, and all those VAL <-> RVAL conversions
+are performed in vain.
+
+* 2005, 01/28  V2.9
+Driver's delay in disconnecting/reconnecting could be almost
+zero in some cases. Now fixed to ~5 secs.
+Buffer code rejects requests for buffers >> PLC buffer limit,
+trying to avoid memory trouble.
+Turned optimization off.
+
+* 2004, 10/06  V2.8
+The "-w" flag of ether_ip_test didn't pack the REAL value,
+so it didn't work on all CPU types.
+
+Tag parsing changes. Take this setup:
+  Nested NESTED;
+  DATATYPE Nested
+     BOOL BOOLs[32];
+     REAL REALs[2];
+     TestStruct STRUCTS[5]
+  DATATYPE TestStruct
+     INT INT;
+     REAL REAL;
+     DINT DINT;
+     BIT BOOL;
+(RSLogix actually adds some pads that are omitted in here)
+
+This one worked: 'NESTED.REALs[1]'
+Access to this one failed: 'NESTED.STRUCTs[1].REAL',
+since in general sub-elements of arrays weren't handled.
+This has been fixed.
+
+* 2004, 8/27  V2.7
+Changes from Stephanie Allison:
+Replaced the registration via a static class instance's
+constructor with a DBD file registrar() entry.
+Removed some compiler warnings from usage of "size_t"
+in printf formats.
+
+* 2004, 8/3  V2.6
+The SNS was using a patched versions of 2.5 that included
+error messages for the case that the clock jumps:
+The scheduling is based on the current time as
+reported by epicsTimeGetCurrent(). A 1 second scan list
+schedules itself for the time of the last run + 1 second.
+A jump in time to e.g. 1 month in the future would trick the driver,
+thinking that the last run was one month in the future and
+the next run is that one month ahead (plus 1 second).
+
+Now, the code attempts some reset in case of running into
+that error.
+
 * 2004, 3/17 V2.5
 The timing was wrong under R3.13, keeping the driver thread
 from sleeping. The code always uses the R3.14-type epicsTimeStamp,

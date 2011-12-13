@@ -1,0 +1,53 @@
+#==============================================================
+#
+#  Name: RELEASE_NOTES
+#
+#  Rem:  This file contains the release notes for ether_ip as
+#        pertains to the LCLS release format and procedures.
+#
+#
+#  Auth: 03-Jul-2007, A. Alarcon         (ALARCON)
+#  Rev:  dd-mmm-yyyy, Reviewer's Name    (USERNAME)
+#--------------------------------------------------------------
+#  Mod:
+#        19-Mar-2010, S. Hoobler          (SONYA):
+#          add release ether_ip-R2-16-lcls3
+#        23-Feb-2010, K. Luchini          (LUCHINI):
+#          add release ether_ip-R2-16-lcls2
+#        29-Apr-2009, K. Luchini          (LUCHINI):
+#          add release ether_ip-R2-16-lcls1
+#        08-Oct-2007, K. Luchini          (LUCHINI):
+#          add release ether_ip-R2-5-lcls2
+#          add release ether_ip-R2-5-lcls1
+#
+#==============================================================
+#
+ether_ip-R2-16-lcls5:  Always, consistency checking of the support applications 
+                       defined in $(TOP)/configure/RELEASE
+
+ether_ip-R2-16-lcls4:  Modify RELEASE file to work with build system using eco
+                       Build with base-R3-14-8-2-lcls6_p1 (RTEMS 4.9.4)
+
+ether_ip-R2-16-lcls3:  Build with base-R3-14-8-2-lcls6 (RTEMS 4.9.4)
+
+ether_ip-R2-16-lcls2:  Build with base-R3-14-8-2-lcls5 (RTEMS 4.9.3)
+
+ether_ip-R2-16-lcls1:  Build with base-R3-14-8-2-lcls3 (RTEMS 4.9.1)
+                       Please note that V2.16 was imported on an 
+                       eariler release, not sure when.
+
+ether_ip-R2-15-lcls3: Cosmetic changes to bring up to R3.14.9 at LCLS
+
+
+ether_ip-R2-15-lcls2: Added RELEASE_SITE and srcDisplay
+                      Build with base-R3-14-9-lcls1
+
+ether_ip-R2-15-lcls1: Import V2.15 from SNS
+                      Build with base-R3-14-9-lcls1
+
+ether_ip-R2-5-lcls2:  Build with base-R3-14-9-lcls1
+
+ether_ip-R2-5-lcls1:  Build with base-R3-14-8-2-lcls2 (RTEMS 4.7.1)
+
+ether_ip-R1-0-0: Initial release used in LCLS Injector and BC1.
+                 Build with base-R3-14-8-2-lcls1 (RTEMS 4.7)
