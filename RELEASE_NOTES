@@ -17,6 +17,8 @@
 #==============================================================
 #
 #
+R2.24.0-0.0.0 : Update to the newest ether_ip driver.
+
 ether_ip-R2-15-lcls3: Cosmetic changes to bring up to R3.14.9 at LCLS
 
 

@@ -1,6 +1,4 @@
-/* $Id: drvEtherIP.h,v 1.1.1.2 2006/06/06 17:25:02 luchini Exp $
- *
- * drvEtherIP
+/* drvEtherIP
  *
  * IOC driver that uses ether_ip routines,
  * keeping lists of PLCs and tags and scanlists etc.
@@ -15,7 +13,7 @@
 #include "dl_list.h"
 
 #define ETHERIP_MAYOR 2
-#define ETHERIP_MINOR 15
+#define ETHERIP_MINOR 24
 
 /* For timing */
 #define EIP_MIN_TIMEOUT         0.1  /* second */
@@ -26,7 +24,7 @@
 
 /* TCP timeout in millisec for connection and readback */
 #define ETHERIP_TIMEOUT 5000
- 
+
 typedef struct __TagInfo  TagInfo;  /* forwards */
 typedef struct __ScanList ScanList;
 typedef struct __PLC      PLC;
@@ -62,8 +60,8 @@ struct __PLC
     int           slot;         /* slot in ControlLogix Backplane: 0, ... */
     size_t        plc_errors;   /* # of communication errors              */
     size_t        slow_scans;   /* Count: scan task is getting late       */
-    EIPConnection connection;
-    DL_List       scanlists;    /* List of struct ScanList */ 
+    EIPConnection *connection;
+    DL_List       scanlists;    /* List of struct ScanList */
     epicsThreadId scan_task_id;
 };
 
@@ -127,7 +125,7 @@ struct __TagInfo
     size_t     valid_data_size;    /* used portion of data, 0 for "invalid" */
     eip_bool   do_write;           /* set by device, reset by driver */
     eip_bool   is_writing;         /* driver copy of do_write for cycle */
-    CN_USINT   *data;              /* CIP data (type, raw data) */
+    CN_USINT   *data;              /* CIP data (type, raw data), with buffer capacity of data_size */
     double     transfer_time;      /* time needed for last transfer */
     DL_List    callbacks;          /* TagCallbacks for new values&write done */
 };
@@ -177,7 +175,7 @@ int drvEtherIP_read_tag(const char *ip_addr,
 #ifdef HAVE_314_API
 void drvEtherIP_Register();
 #endif
-  
+
 #ifdef __cplusplus
 }
 #endif

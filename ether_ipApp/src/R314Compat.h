@@ -1,4 +1,4 @@
-/* $Id: R314Compat.h,v 1.1.1.1 2004/03/17 22:24:15 saa Exp $
+/* $Id$
  *
  * R314Compat.h
  *

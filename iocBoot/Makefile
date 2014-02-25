@@ -1,4 +1,7 @@
 TOP = ..
-
 include $(TOP)/configure/CONFIG
-include $(TOP)/configure/RULES.iocBoot
+
+DIRS += $(wildcard *ioc*)
+DIRS += $(wildcard as*)
+
+include $(EPICS_BASE)/configure/RULES_DIRS

@@ -1,4 +1,4 @@
-/* $Id: devEtherIP.c,v 1.2 2005/07/13 21:09:49 saa Exp $
+/* $Id: devEtherIP.c,v 1.12 2011/04/12 18:08:48 saa Exp $
  *
  * devEtherIP
  *
@@ -37,13 +37,31 @@
 #include <boRecord.h>
 #include <mbboRecord.h>
 #include <mbboDirectRecord.h>
+#include <errlog.h>
+
 /* Local */
 #include "drvEtherIP.h"
 
 #ifdef HAVE_314_API
 /* Base */
-#include "epicsExport.h"
+#  include "epicsExport.h"
+
+   /* Contributed by Janet Anderson:
+    * Compatibility for R3.14.10 change in RVAL type
+    */
+#  define GE_EPICSBASE(v,r,l) ((EPICS_VERSION>=(v)) && (EPICS_REVISION>=(r)) && (EPICS_MODIFICATION>=(l)))
+#  if GE_EPICSBASE(3,14,10)
+#    define RVALTYPE epicsUInt32
+#    define RVALFMT "u"
+#  else
+#    define RVALTYPE unsigned long
+#    define RVALFMT "lu"
+#  endif
+#else
+#  define RVALTYPE unsigned long
+#  define RVALFMT "lu"
 #endif
+
 
 /* Flags that pick special values instead of the tag's "value" */
 typedef enum
@@ -52,38 +70,39 @@ typedef enum
     SPCO_SCAN_PERIOD         = (1<<1),
     SPCO_BIT                 = (1<<2),
     SPCO_FORCE               = (1<<3),
-    SPCO_PLC_ERRORS          = (1<<4),
-    SPCO_PLC_TASK_SLOW       = (1<<5),
-    SPCO_LIST_ERRORS         = (1<<6),
-    SPCO_LIST_TICKS          = (1<<7),
-    SPCO_LIST_SCAN_TIME      = (1<<8),
-    SPCO_LIST_MIN_SCAN_TIME  = (1<<9),
-    SPCO_LIST_MAX_SCAN_TIME  = (1<<10),
-    SPCO_TAG_TRANSFER_TIME   = (1<<11),
-    SPCO_LIST_TIME           = (1<<12),
-    SPCO_INVALID             = (1<<13)
+    SPCO_INDEX_INCLUDED      = (1<<4),
+    SPCO_PLC_ERRORS          = (1<<6),
+    SPCO_PLC_TASK_SLOW       = (1<<7),
+    SPCO_LIST_ERRORS         = (1<<8),
+    SPCO_LIST_TICKS          = (1<<9),
+    SPCO_LIST_SCAN_TIME      = (1<<10),
+    SPCO_LIST_MIN_SCAN_TIME  = (1<<11),
+    SPCO_LIST_MAX_SCAN_TIME  = (1<<12),
+    SPCO_TAG_TRANSFER_TIME   = (1<<13),
+    SPCO_LIST_TIME           = (1<<14),
+    SPCO_INVALID             = (1<<15)
 } SpecialOptions;
 
 static struct
 {
     const char *text;
-    size_t      len;
+	SpecialOptions mask;
 } special_options[] =
 {
-  { "E",                   1 },
-  { "S ",                  2 }, /* note <space> */
-  { "B ",                  2 }, /* note <space> */
-  { "FORCE",               5 }, /* Force output records to write when!=tag */
-  { "PLC_ERRORS",         10 }, /* Connection error count for tag's PLC */
-  { "PLC_TASK_SLOW",      13 }, /* How often scan task had no time to wait */
-  { "LIST_ERRORS",        11 }, /* Error count for tag's list */
-  { "LIST_TICKS",         10 }, /* 3.13-Ticktime when tag's list was checked */
-  { "LIST_SCAN_TIME",     14 }, /* Time for handling scanlist */
-  { "LIST_MIN_SCAN_TIME", 18 }, /* min. of '' */
-  { "LIST_MAX_SCAN_TIME", 18 }, /* max. of '' */
-  { "TAG_TRANSFER_TIME",  17 }, /* Time for last round-trip data request */
-  { "LIST_TIME",           9 }, /* 3.14-# of seconds since 0000 Jan 1, 1990 */
-                                /*      when tag's list was checked */
+  { "E",                  SPCO_READ_SINGLE_ELEMENT }, /* Force a SCAN for a single element */
+  { "S ",                 SPCO_SCAN_PERIOD        }, /* note <space> Set SCAN period for I/O */
+  { "B ",                 SPCO_BIT                }, /* note <space>  Select Bit out of element */
+  { "FORCE",              SPCO_FORCE              }, /* Force output records to write when!=tag */
+  { "PLC_ERRORS",         SPCO_PLC_ERRORS         }, /* Connection error count for tag's PLC */
+  { "PLC_TASK_SLOW",      SPCO_PLC_TASK_SLOW      }, /* How often scan task had no time to wait */
+  { "LIST_ERRORS",        SPCO_LIST_ERRORS        }, /* Error count for tag's list */
+  { "LIST_TICKS",         SPCO_LIST_TICKS         }, /* 3.13-Ticktime when tag's list was checked */
+  { "LIST_SCAN_TIME",     SPCO_LIST_SCAN_TIME     }, /* Time for handling scanlist */
+  { "LIST_MIN_SCAN_TIME", SPCO_LIST_MIN_SCAN_TIME }, /* min. of '' */
+  { "LIST_MAX_SCAN_TIME", SPCO_LIST_MAX_SCAN_TIME }, /* max. of '' */
+  { "TAG_TRANSFER_TIME",  SPCO_TAG_TRANSFER_TIME  }, /* Time for last round-trip data request */
+  { "LIST_TIME",          SPCO_LIST_TIME          }, /* 3.14-# of seconds since 0000 Jan 1, 1990 */
+  { "",                   0                       }, /*      when tag's list was checked */
 };
 
 /* Device Private:
@@ -122,11 +141,11 @@ static void dump_DevicePrivate(const dbCommon *rec)
     printf("   link_text  : '%s'\n",  pvt->link_text);
     printf("   PLC_name   : '%s'\n",  pvt->PLC_name);
     printf("   string_tag : '%s', element %d\n",
-           pvt->string_tag, pvt->element);
+           pvt->string_tag, (int)pvt->element);
     printf("   mask       : 0x%08X    spec. opts.: %d\n",
-           (unsigned int)pvt->mask, pvt->special);
-    printf("   plc        : 0x%08X    tag        : 0x%08X\n",
-           (unsigned int)pvt->plc, (unsigned int)pvt->tag);
+           pvt->mask, pvt->special);
+    printf("   plc        : 0x%lX    tag        : 0x%lX\n",
+           (unsigned long)pvt->plc, (unsigned long)pvt->tag);
 }
 
 /* Helper: check for valid DevicePrivate, lock data
@@ -179,17 +198,17 @@ static eip_bool check_data(const dbCommon *rec)
  * 1) NOBT might change but MASK is only set once
  * 2) MASK doesn't help when reading bits accross UDINT boundaries
  */
-static eip_bool get_bits(dbCommon *rec, size_t bits, unsigned long *rval)
+static eip_bool get_bits(dbCommon *rec, size_t bits, RVALTYPE *rval)
 {
     DevicePrivate  *pvt = (DevicePrivate *)rec->dpvt;
     size_t         i, element = pvt->element;
     CN_UDINT       value, mask = pvt->mask;
-    
+
     *rval   = 0;
     if (!get_CIP_UDINT(pvt->tag->data, element, &value))
     {
         errlogPrintf("EIP get_bits(%s), element %d failed\n",
-                     rec->name, element);
+                     rec->name, (int)element);
         return false;
     }
     /* Fetch bits from BOOL array.
@@ -206,27 +225,27 @@ static eip_bool get_bits(dbCommon *rec, size_t bits, unsigned long *rval)
             if (!get_CIP_UDINT(pvt->tag->data, element, &value))
             {
                 errlogPrintf("EIP get_bits(%s), element %d failed\n",
-                       rec->name, element);
+                       rec->name, (int)element);
                 return false;
             }
         }
         if (value & mask)
-            *rval |= (unsigned long)1 << i;
+            *rval |= 1 << (RVALTYPE)i;
     }
     return true;
 }
 
 /* Pendant to get_bits */
-static eip_bool put_bits(dbCommon *rec, size_t bits, unsigned long rval)
+static eip_bool put_bits(dbCommon *rec, size_t bits, RVALTYPE rval)
 {
     DevicePrivate  *pvt = (DevicePrivate *)rec->dpvt;
     size_t         i, element = pvt->element;
     CN_UDINT       value, mask = pvt->mask;
-    
+
     if (! get_CIP_UDINT(pvt->tag->data, element, &value))
     {
         errlogPrintf("EIP put_bits(%s), element %d failed\n",
-                     rec->name, element);
+                     rec->name, (int)element);
         return false;
     }
     /* Transfer bits into BOOL array.
@@ -234,7 +253,7 @@ static eip_bool put_bits(dbCommon *rec, size_t bits, unsigned long rval)
     if (rval & 1)
         value |= mask;
     else
-        value &= ~mask;
+        value = (value | mask) ^ mask;		/* Force the bit ON, then turn it off */
     for (i=1/*!*/; i<bits; ++i)
     {
         rval >>= 1;
@@ -244,7 +263,7 @@ static eip_bool put_bits(dbCommon *rec, size_t bits, unsigned long rval)
             if (! put_CIP_UDINT(pvt->tag->data, element, value))
             {
                 errlogPrintf("EIP put_bits(%s), element %d failed\n",
-                             rec->name, element);
+                             rec->name, (int)element);
                 return false;
             }
             mask = 1; /* reset mask, go to next element */
@@ -252,7 +271,7 @@ static eip_bool put_bits(dbCommon *rec, size_t bits, unsigned long rval)
             if (! get_CIP_UDINT(pvt->tag->data, element, &value))
             {
                 errlogPrintf("EIP put_bits(%s), element %d failed\n",
-                             rec->name, element);
+                             rec->name, (int)element);
                 return false;
             }
         }
@@ -264,10 +283,9 @@ static eip_bool put_bits(dbCommon *rec, size_t bits, unsigned long rval)
     if (!put_CIP_UDINT(pvt->tag->data, element, value))
     {
         errlogPrintf("EIP put_bits(%s), element %d failed\n",
-                     rec->name, element);
+                     rec->name, (int)element);
         return false;
     }
-    
     return true;
 }
 
@@ -282,6 +300,22 @@ static void scan_callback(void *arg)
     if (rec->tpro)
         printf("EIP scan_callback('%s')\n", rec->name);
     scanIoRequest(pvt->ioscanpvt);
+}
+
+static void etherIP_scanOnce(void * pRec)
+{
+    /*
+     * astonished to discover that initHookRegister is in
+     * initHooks.h in R3.13, but initHookRegister isnt
+     * in iocCore object file in R3.13, so we resort
+     * to an archaic brute force approach
+     */
+#   ifndef HAVE_314_API
+    while ( ! interruptAccept ) {
+        epicsThreadSleep  ( 0.1 );
+    }
+#   endif
+    scanOnce ( pRec );
 }
 
 /* Callback from driver for every received tag, for ao record:
@@ -369,8 +403,8 @@ static void check_ao_callback(void *arg)
             (rec->udf || rec->sevr == INVALID_ALARM || rec->rval != dint))
         {
             if (rec->tpro)
-                printf("AO '%s': got %ld from driver\n",
-                       rec->name, (long)dint);
+                printf("AO '%s': got %d from driver\n",
+                       rec->name, dint);
             if (!rec->udf  &&  pvt->special & SPCO_FORCE)
             {
                 if (rec->tpro)
@@ -414,7 +448,7 @@ static void check_ao_callback(void *arg)
     dbScanUnlock((dbCommon *)rec);
     /* Does record need processing and is not periodic? */
     if (process && rec->scan < SCAN_1ST_PERIODIC)
-        scanOnce(rec);
+        etherIP_scanOnce(rec);
 }
 
 /* Callback for bo, see ao_callback comments */
@@ -423,7 +457,7 @@ static void check_bo_callback(void *arg)
     boRecord      *rec = (boRecord *) arg;
     struct rset   *rset= (struct rset *)(rec->rset);
     DevicePrivate *pvt = (DevicePrivate *)rec->dpvt;
-    unsigned long rval;
+    RVALTYPE      rval;
     eip_bool      process = false;
 
     /* We are about the check and even set val, & rval -> lock */
@@ -445,7 +479,7 @@ static void check_bo_callback(void *arg)
         (rec->udf || rec->sevr == INVALID_ALARM || rec->rval != rval))
     {
         if (rec->tpro)
-            printf("'%s': got %lu from driver\n", rec->name, rval);
+            printf("'%s': got %"RVALFMT" from driver\n", rec->name, rval);
         if (!rec->udf  &&  pvt->special & SPCO_FORCE)
         {
             if (rec->tpro)
@@ -466,7 +500,7 @@ static void check_bo_callback(void *arg)
     dbScanUnlock((dbCommon *)rec);
     /* Does record need processing and is not periodic? */
     if (process && rec->scan < SCAN_1ST_PERIODIC)
-        scanOnce(rec);
+        etherIP_scanOnce(rec);
 }
 
 /* Callback for mbbo */
@@ -475,7 +509,7 @@ static void check_mbbo_callback(void *arg)
     mbboRecord    *rec = (mbboRecord *) arg;
     struct rset   *rset= (struct rset *)(rec->rset);
     DevicePrivate *pvt = (DevicePrivate *)rec->dpvt;
-    unsigned long rval, *state_val;
+    RVALTYPE      rval, *state_val;
     size_t        i;
     eip_bool      process = false;
 
@@ -498,7 +532,7 @@ static void check_mbbo_callback(void *arg)
         (rec->udf || rec->sevr == INVALID_ALARM || rec->rval != rval))
     {
         if (rec->tpro)
-            printf("'%s': got %lu from driver\n", rec->name, rval);
+            printf("'%s': got %"RVALFMT" from driver\n", rec->name, rval);
         if (!rec->udf  &&  pvt->special & SPCO_FORCE)
         {
             if (rec->tpro)
@@ -536,7 +570,7 @@ static void check_mbbo_callback(void *arg)
     dbScanUnlock((dbCommon *)rec);
     /* Does record need processing and is not periodic? */
     if (process && rec->scan < SCAN_1ST_PERIODIC)
-        scanOnce (rec);
+        etherIP_scanOnce (rec);
 }
 
 /* Callback for mbboDirect */
@@ -545,7 +579,7 @@ static void check_mbbo_direct_callback(void *arg)
     mbboDirectRecord *rec = (mbboDirectRecord *) arg;
     struct rset      *rset= (struct rset *)(rec->rset);
     DevicePrivate    *pvt = (DevicePrivate *)rec->dpvt;
-    unsigned long    rval;
+    RVALTYPE         rval;
     eip_bool         process = false;
 
     /* We are about the check and even set val, & rval -> lock */
@@ -567,7 +601,7 @@ static void check_mbbo_direct_callback(void *arg)
         (rec->udf || rec->sevr == INVALID_ALARM || rec->rval != rval))
     {
         if (rec->tpro)
-            printf("'%s': got %lu from driver\n",
+            printf("'%s': got %"RVALFMT" from driver\n",
                    rec->name, rval);
         if (!rec->udf  &&  pvt->special & SPCO_FORCE)
         {
@@ -586,7 +620,7 @@ static void check_mbbo_direct_callback(void *arg)
     dbScanUnlock((dbCommon *)rec);
     /* Does record need processing and is not periodic? */
     if (process && rec->scan < SCAN_1ST_PERIODIC)
-        scanOnce(rec);
+        etherIP_scanOnce(rec);
 }
 
 /* device support routine get_ioint_info */
@@ -600,46 +634,59 @@ static long get_ioint_info(int cmd, dbCommon *rec, IOSCANPVT *ppvt)
 
 /* Try to parse scan period from record's SCAN field.
  * Sounds simple, but I ended up with this mess.
- * Is there a more elegant way to get this?
+ * At DB runtime, scanPeriod(rec->scan) would return
+ * the scan period in seconds, but at record initialization
+ * time scanPeriod() doesn't work, so we have to get the
+ * SCAN field text and parse the seconds ourselves.
+ *
  * Returns <= 0 for error.
  */
 static double get_period(dbCommon *rec)
 {
-    char          *buf = 0, *p;
-    size_t        buf_size = 0, len;
+	/** Buffer that can hold PV name plus ".SCAN" as well as SCAN field values */
+	char          buf[PVNAME_STRINGSZ + 10];
+    char          *p;
+    size_t        len;
     struct dbAddr scan_field;
     long          options=0, count=1;
     double        period = -1.0;
 
     if (rec->scan < SCAN_1ST_PERIODIC)
         return period;
-    
-    /* Best guess for holding SCAN field name and value */
-    if (! EIP_reserve_buffer((void**)&buf, &buf_size, 50))
-        return period;
-    /* Get SCAN field's address */
-    len = strlen (rec->name);
-    if (! EIP_reserve_buffer((void**)&buf, &buf_size, len+6))
-        goto leave;
+
+    len = strlen(rec->name);
+    if (sizeof(buf) < len+6)
+    {
+        EIP_printf(1, "EIP record name '%s' too long to access SCAN field\n", rec->name);
+    	return period;
+    }
     memcpy(buf, rec->name, len);
     memcpy(buf+len, ".SCAN", 6);
     if (dbNameToAddr(buf, &scan_field) != 0)
-        goto leave;
+	{
+		EIP_printf(1, "EIP cannot locate '%s'\n", buf);
+		return period;
+	}
 
-    /* Get value */
     len = dbBufferSize(DBR_STRING, options, count);
-    if (! EIP_reserve_buffer((void**)&buf, &buf_size, len))
-        goto leave;
+    if (sizeof(buf) <= len)
+    {
+        EIP_printf(1, "EIP value of '%s' too long\n", buf);
+    	return period;
+    }
     if (dbGet(&scan_field, DBR_STRING, buf, &options, &count, 0) != 0)
-        goto leave;
-    if (! strstr(buf, "second"))
-        goto leave;
-    period = strtod(buf, &p);
-    if (p==buf || period==HUGE_VAL || period==-HUGE_VAL)
-        period = -1.0;
-  leave:
-    free(buf);
-    return period;
+    {
+        EIP_printf(1, "EIP cannot read '%s'\n", buf);
+    	return period;
+    }
+    if (strstr(buf, "second"))
+    {
+		period = strtod(buf, &p);
+		if (p==buf || period==HUGE_VAL || period==-HUGE_VAL)
+			period = -1.0;
+    }
+    EIP_printf(8, "EIP record '%s' scans at %.1lf secs\n", rec->name, period);
+	return period;
 }
 
 /* Given string "s", return next token and end of token
@@ -653,7 +700,7 @@ static char *find_token(char *s, char **end)
 
     if (*s == '\0')
         return 0;
-    
+
     *end = strchr(s, ' ');
     if (*end == NULL)
         *end = s + strlen(s);
@@ -679,13 +726,17 @@ static long analyze_link(dbCommon *rec,
     DevicePrivate  *pvt = (DevicePrivate *)rec->dpvt;
     char           *p, *end;
     size_t         i, tag_len, last_element, bit=0;
-    unsigned long  mask;
     double         period = 0.0;
     eip_bool       single_element = false;
-    SpecialOptions special = 0;
-    
-    if (! EIP_strdup(&pvt->link_text, link->value.instio.string,
-                     strlen (link->value.instio.string)))
+
+    if (pvt->link_text)
+    {
+    	EIP_printf(3, "EIP link changed for record %s\n", rec->name);
+    	free(pvt->link_text);
+		pvt->link_text = NULL;
+    }
+    pvt->link_text = EIP_strdup(link->value.instio.string);
+    if (! pvt->link_text)
     {
         errlogPrintf("devEtherIP (%s): Cannot copy link\n", rec->name);
         return S_dev_noMemory;
@@ -698,11 +749,24 @@ static long analyze_link(dbCommon *rec,
                      rec->name, pvt->link_text);
         return S_db_badField;
     }
-    if (! EIP_strdup(&pvt->PLC_name, p, end-p))
+
+
+    if (pvt->PLC_name && strncmp(pvt->PLC_name, p, end-p) )
     {
-        errlogPrintf("devEtherIP (%s): Cannot copy PLC\n", rec->name);
-        return S_dev_noMemory;
+    	EIP_printf(3, "EIP PLC changed for record %s\n", rec->name);
+    	free(pvt->PLC_name);
+		pvt->PLC_name = NULL;
     }
+	
+	if(!pvt->PLC_name)
+	{
+		pvt->PLC_name = EIP_strdup_n(p, end-p);
+		if (! pvt->PLC_name)
+    	{
+       		errlogPrintf("devEtherIP (%s): Cannot copy PLC\n", rec->name);
+        	return S_dev_noMemory;
+	    }
+	}
 
     /* Find Tag */
     p = find_token(end, &end);
@@ -713,25 +777,39 @@ static long analyze_link(dbCommon *rec,
         return(S_db_badField);
     }
     tag_len = end-p;
-    if (! EIP_strdup(&pvt->string_tag, p, tag_len))
+
+
+    if (pvt->string_tag && strncmp(pvt->string_tag, p, tag_len) )
     {
-        errlogPrintf("devEtherIP (%s): Cannot copy tag\n", rec->name);
-        return S_dev_noMemory;
+    	EIP_printf(3, "EIP tag changed for record %s\n", rec->name);
+    	free(pvt->string_tag);
+		pvt->string_tag = NULL;
     }
-    
+	
+	if(!pvt->string_tag)
+	{
+    	pvt->string_tag = EIP_strdup_n(p, tag_len);
+    	if (! pvt->string_tag)
+   		{
+        	errlogPrintf("devEtherIP (%s): Cannot copy tag\n", rec->name);
+        	return S_dev_noMemory;
+    	}
+	}
+
     /* Check for more flags */
+	pvt->special = 0;  /* Init special options */
     while ((p = find_token(end, &end)))
     {
-        for (i=0, mask=1;
-             mask < SPCO_INVALID;
-             ++i, mask=mask<<1)
+        for (i=0;
+             special_options[i].mask;
+             ++i)
         {
             if (strncmp(p,
                         special_options[i].text,
-                        special_options[i].len) == 0)
+                        strlen(special_options[i].text) ) == 0)
             {
-                special |= mask;
-                if (mask==SPCO_READ_SINGLE_ELEMENT)
+                pvt->special |= special_options[i].mask;
+                if (special_options[i].mask==SPCO_READ_SINGLE_ELEMENT)
                 {
                     if (count != 1)
                     {
@@ -743,7 +821,7 @@ static long analyze_link(dbCommon *rec,
                     }
                     single_element = true;
                 }
-                else if (mask==SPCO_SCAN_PERIOD)
+                else if (special_options[i].mask==SPCO_SCAN_PERIOD)
                 {
                     period = strtod(p+2, &end);
                     if (end==p || period==HUGE_VAL || period==-HUGE_VAL)
@@ -754,7 +832,7 @@ static long analyze_link(dbCommon *rec,
                         return S_db_badField;
                     }
                 }
-                else if (mask==SPCO_BIT)
+                else if (special_options[i].mask==SPCO_BIT)
                 {
                     bit = strtod(p+2, &end);
                     if (end==p || period==HUGE_VAL || period==-HUGE_VAL)
@@ -768,15 +846,14 @@ static long analyze_link(dbCommon *rec,
                 break;
             }
         }
-        if (mask >= SPCO_INVALID)
+        if (!special_options[i].mask)
         {
             errlogPrintf("devEtherIP (%s): Invalid flag '%s' in link '%s'\n",
                          rec->name, p, pvt->link_text);
             return S_db_badField;
         }
     }
-    
-    pvt->special = special;
+
     if (period <= 0.0) /* no scan flag-> get SCAN field: */
     {
         period = get_period(rec);
@@ -792,7 +869,7 @@ static long analyze_link(dbCommon *rec,
             errlogPrintf("please complete the record configuration\n");
         }
     }
-    
+
     /* Parsed link_text into PLC_name, string_tag, special flags.
      * Analyse further */
     pvt->element = 0;
@@ -818,6 +895,9 @@ static long analyze_link(dbCommon *rec,
                              rec->name, pvt->link_text);
                 return S_db_badField;
             }
+			/* Show that this definition included an index reference */
+			pvt->special |= SPCO_INDEX_INCLUDED;
+			
             /* remove element number text from tag */
             *p = '\0';
         }
@@ -831,26 +911,31 @@ static long analyze_link(dbCommon *rec,
         return S_db_badField;
     }
 
-    if (count > 1 && (bits > 0  || (special & SPCO_BIT)))
+    if (count > 1 && (bits > 0  || (pvt->special & SPCO_BIT)))
     {
         errlogPrintf("devEtherIP (%s): cannot access bits for array records\n",
                      rec->name);
         return S_db_badField;
     }
-    /* For Element==0 the following makes no difference, only
-     * for binary records (bits=1 or more)
-     * Options:
-     * a) assume BOOL array (default)
-     * b) non-BOOL, SPCO_BIT selected a bit in INT, DINT, ...
-     */
-    if (bits>0 && !(special & SPCO_BIT))
+
+    if (bits>0 && !(pvt->special & SPCO_BIT))
     {
-        /* For element>0, assume that it's a BOOL array,
-         * so the data is packed into UDINTs (CIP "BITS").
-         * The actual element requested is the UDINT index,
-         * not the bit#.
-         * Pick the bits within the UDINT via the mask. */
-        pvt->mask = 1U << (pvt->element & 0x1F); /* 0x1F == 31 */
+		/* This is defining a boolean object that didn't have a bit number */
+		if(pvt->special & SPCO_INDEX_INCLUDED)
+		{
+			/* If an index was supplied, it's a BOOL array,
+        	 * so the data is packed into UDINTs (CIP "BITS").
+        	 * The actual element requested is the UDINT index,
+        	 * not the bit#.
+        	 * Pick the bits within the UDINT via the mask.
+        	 */
+        	pvt->mask = 1U << (pvt->element & 0x1F); /* 0x1F == 31 */
+		}
+		else
+		{
+			/* There was no index, so it's just a plain BOOLEAN reference */
+			pvt->mask = 255;
+		}
         last_element = pvt->element + bits - 1;
         pvt->element >>= 5;
         last_element >>= 5;
@@ -884,7 +969,7 @@ static long analyze_link(dbCommon *rec,
     }
     else
         drvEtherIP_add_callback(pvt->plc, pvt->tag, cbtype, rec);
-    
+
     return 0;
 }
 
@@ -947,7 +1032,7 @@ static long init_record(dbCommon *rec, EIPCallback cbtype,
     }
     scanIoInit(&pvt->ioscanpvt);
     rec->dpvt = pvt;
-    
+
     return analyze_link(rec, cbtype, link, count, bits);
 }
 
@@ -955,7 +1040,8 @@ static long ai_init_record(aiRecord *rec)
 {
     long status = init_record((dbCommon *)rec, scan_callback, &rec->inp, 1, 0);
     /* Make sure record processing routine does not perform any conversion*/
-    if (rec->linr != menuConvertSLOPE) rec->linr = 0;
+    if (rec->linr != menuConvertSLOPE)
+        rec->linr = 0;
     return status;
 }
 
@@ -1022,7 +1108,7 @@ static long mbbo_init_record(mbboRecord *rec)
     return 2; /* don't convert, we have no value, yet */
 }
 
-static long mbbo_direct_init_record(mbboDirectRecord *rec) 
+static long mbbo_direct_init_record(mbboDirectRecord *rec)
 {
     long status = init_record((dbCommon *)rec, check_mbbo_direct_callback,
                               &rec->out, 1, rec->nobt);
@@ -1051,7 +1137,7 @@ static long ai_read(aiRecord *rec)
     {
         /* Most common case: ai reads a tag from PLC */
         if (pvt->special < SPCO_PLC_ERRORS)
-        {   
+        {
             if (pvt->tag->valid_data_size>0 && pvt->tag->elements>pvt->element)
             {
                 if (get_CIP_typecode(pvt->tag->data) == T_CIP_REAL)
@@ -1111,7 +1197,7 @@ static long bi_read(biRecord *rec)
     DevicePrivate *pvt = (DevicePrivate *)rec->dpvt;
     long status;
     eip_bool ok;
-    
+
     if (rec->tpro)
         dump_DevicePrivate((dbCommon *)rec);
     status = check_link((dbCommon *)rec, scan_callback, &rec->inp, 1, 1);
@@ -1126,11 +1212,11 @@ static long bi_read(biRecord *rec)
         epicsMutexUnlock(pvt->tag->data_lock);
     }
     else
-        ok = false;    
+        ok = false;
     if (ok)
         rec->udf = FALSE;
     else
-        recGblSetSevr(rec, READ_ALARM, INVALID_ALARM);    
+        recGblSetSevr(rec, READ_ALARM, INVALID_ALARM);
     return 0;
 }
 
@@ -1139,7 +1225,7 @@ static long mbbi_read (mbbiRecord *rec)
     DevicePrivate *pvt = (DevicePrivate *)rec->dpvt;
     long status;
     eip_bool ok;
-    
+
     if (rec->tpro)
         dump_DevicePrivate ((dbCommon *)rec);
     status = check_link ((dbCommon *)rec, scan_callback,
@@ -1212,7 +1298,7 @@ static long si_read(stringinRecord *rec)
         epicsMutexUnlock(pvt->tag->data_lock);
     }
     else
-        ok = false;    
+        ok = false;
     if (ok)
         rec->udf = FALSE;
     else
@@ -1285,7 +1371,7 @@ static long wf_read(waveformRecord *rec)
             {   /* CIP data is something other than REAL and SINT */
                 if (rec->ftvl == menuFtypeLONG)
                 {
-                    dint = (long *)rec->bptr;
+                    dint = (CN_DINT *)rec->bptr;
                     for (i=0; ok && i<rec->nelm; ++i, ++dint)
                         ok = get_CIP_DINT(pvt->tag->data, i, dint);
                     if (ok)
@@ -1389,7 +1475,7 @@ static long bo_write(boRecord *rec)
 {
     DevicePrivate *pvt = (DevicePrivate *)rec->dpvt;
     long          status;
-    unsigned long rval;
+    RVALTYPE      rval;
     eip_bool      ok = true;
 
     if (rec->pact)
@@ -1414,7 +1500,7 @@ static long bo_write(boRecord *rec)
             if (rec->rval != rval)
             {
                 if (rec->tpro)
-                    printf("'%s': write %lu\n", rec->name, rec->rval);
+                    printf("'%s': write %"RVALFMT"\n", rec->name, rec->rval);
                 ok = put_bits((dbCommon *)rec, 1, rec->rval);
                 if (pvt->tag->do_write)
                     EIP_printf(6,"'%s': already writing\n", rec->name);
@@ -1430,7 +1516,7 @@ static long bo_write(boRecord *rec)
     if (ok)
         rec->udf = FALSE;
     else
-        recGblSetSevr(rec, WRITE_ALARM, INVALID_ALARM);    
+        recGblSetSevr(rec, WRITE_ALARM, INVALID_ALARM);
     return 0;
 }
 
@@ -1438,7 +1524,7 @@ static long mbbo_write (mbboRecord *rec)
 {
     DevicePrivate *pvt = (DevicePrivate *)rec->dpvt;
     long          status;
-    unsigned long rval;
+    RVALTYPE      rval;
     eip_bool      ok = true;
 
     if (rec->pact)
@@ -1462,7 +1548,7 @@ static long mbbo_write (mbboRecord *rec)
         if (get_bits((dbCommon *)rec, rec->nobt, &rval) && rec->rval != rval)
         {
             if (rec->tpro)
-                printf("'%s': write %lu\n", rec->name, rec->rval);
+                printf("'%s': write %"RVALFMT"\n", rec->name, rec->rval);
             ok = put_bits((dbCommon *)rec, rec->nobt, rec->rval);
             if (pvt->tag->do_write)
                 EIP_printf(6,"'%s': already writing\n", rec->name);
@@ -1473,7 +1559,7 @@ static long mbbo_write (mbboRecord *rec)
         epicsMutexUnlock(pvt->tag->data_lock);
     }
     else
-        ok = false;    
+        ok = false;
     if (ok)
         rec->udf = FALSE;
     else
@@ -1485,7 +1571,7 @@ static long mbbo_direct_write (mbboDirectRecord *rec)
 {
     DevicePrivate *pvt = (DevicePrivate *)rec->dpvt;
     long          status;
-    unsigned long rval;
+    RVALTYPE      rval;
     eip_bool      ok = true;
 
     if (rec->pact)
@@ -1509,7 +1595,7 @@ static long mbbo_direct_write (mbboDirectRecord *rec)
         if (get_bits((dbCommon *)rec, rec->nobt, &rval)  &&  rec->rval != rval)
         {
             if (rec->tpro)
-                printf("'%s': write %lu\n", rec->name, rec->rval);
+                printf("'%s': write %"RVALFMT"\n", rec->name, rec->rval);
             ok = put_bits((dbCommon *)rec, rec->nobt, rec->rval);
             if (pvt->tag->do_write)
                 EIP_printf(6,"'%s': already writing\n", rec->name);
@@ -1660,6 +1746,6 @@ epicsExportAddress(dset,devBoEtherIP);
 epicsExportAddress(dset,devMbboEtherIP);
 epicsExportAddress(dset,devMbboDirectEtherIP);
 #endif
-                   
+
 /* EOF devEtherIP.c */
 

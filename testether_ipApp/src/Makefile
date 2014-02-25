@@ -4,7 +4,6 @@ TOP = ../..
 include $(TOP)/configure/CONFIG
 #----------------------------------------
 #  ADD MACRO DEFINITIONS AFTER THIS LINE
-#=============================
 
 # <name>.dbd will be created from <name>Include.dbd
 DBD += example.dbd
@@ -32,20 +31,10 @@ example_LIBS_DEFAULT += testDevIoc
 example_LIBS += ether_ip
 ether_ip_DIR = $(INSTALL_LIB)
 
-example_LIBS += iocsh
-example_LIBS += miscIoc
-example_LIBS += rsrvIoc
-example_LIBS += dbtoolsIoc
-example_LIBS += asIoc
-example_LIBS += dbIoc
-example_LIBS += registryIoc
-example_LIBS += dbStaticIoc
-example_LIBS += ca
-example_LIBS += Com
+example_LIBS += $(EPICS_BASE_IOC_LIBS)
 
 #===========================
 
 include $(TOP)/configure/RULES
 #----------------------------------------
 #  ADD RULES AFTER THIS LINE
-
