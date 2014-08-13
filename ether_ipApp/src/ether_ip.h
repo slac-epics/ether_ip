@@ -1,4 +1,4 @@
-/* $Id: ether_ip.h,v 1.20 2006/04/06 13:51:48 kasemir Exp $
+/* $Id: ether_ip.h,v 1.10 2011/04/12 18:08:48 saa Exp $
  *
  * ether_ip
  *
@@ -27,12 +27,13 @@
 #include <winsock2.h>
 #pragma pack(push, 1)
 
-#define SOCKERRNO       WSAGetLastError()                   
-#define socket_close(S) closesocket(S)
-#define socket_ioctl(A,B,C) ioctlsocket(A,B,C)
-typedef u_long FAR osiSockIoctl_t;    
-#define SOCK_EWOULDBLOCK WSAEWOULDBLOCK
-#define SOCK_EINPROGRESS WSAEINPROGRESS 
+#define EIP_SOCKET          SOCKET
+#define EIP_INVALID_SOCKET  INVALID_SOCKET
+#define EIP_SOCKERRNO       WSAGetLastError()
+#define EIP_socket_close(S) closesocket(S)
+#define EIP_socket_ioctl(A,B,C) ioctlsocket(A,B,C)
+#define EIP_SOCK_EWOULDBLOCK WSAEWOULDBLOCK
+#define EIP_SOCK_EINPROGRESS WSAEINPROGRESS
 /* end of Win32 settings */
 
 #else
@@ -56,51 +57,46 @@ typedef u_long FAR osiSockIoctl_t;
 #include <selectLib.h>
 #include <ctype.h>
 #include <tickLib.h>
-typedef int               SOCKET;
-#define INVALID_SOCKET    (-1)
-#define SOCKET_ERROR      (-1)
-#define SOCKERRNO         errno
-#define socket_close(S)   close(S)
-#define socket_ioctl(A,B,C) ioctl(A,B,(int)C)
-#define SOCK_EWOULDBLOCK  EWOULDBLOCK                 
-#define SOCK_EINPROGRESS  EINPROGRESS
+typedef int               EIP_SOCKET;
+#define EIP_INVALID_SOCKET    (-1)
+#define EIP_SOCKERRNO         errno
+#define EIP_socket_close(S)   close(S)
+#define EIP_socket_ioctl(A,B,C) ioctl(A,B,(int)C)
+#define EIP_SOCK_EWOULDBLOCK  EWOULDBLOCK
+#define EIP_SOCK_EINPROGRESS  EINPROGRESS
 /* end of vxWorks settings */
 
 #else
 
 /* Unix settings */
 #include <sys/types.h>
-#include <sys/socket.h>   
+#include <sys/socket.h>
 #include <sys/time.h>
 #include <sys/ioctl.h>
 #include <sys/fcntl.h>
 #include <unistd.h>
-#include <errno.h>    
-#include <netinet/in.h>    
+#include <errno.h>
+#include <netinet/in.h>
 #include <netinet/tcp.h>
-#include <arpa/inet.h>    
-#include <netdb.h>    
-typedef int               SOCKET;
-#define INVALID_SOCKET    (-1)
-#define SOCKET_ERROR      (-1)
-#define SOCKERRNO         errno
-#define socket_close(S)   close(S)
-#define socket_ioctl(A,B,C) ioctl(A,B,C)
-#define SOCK_EWOULDBLOCK  EWOULDBLOCK                 
-#define SOCK_EINPROGRESS  EINPROGRESS
+#include <arpa/inet.h>
+#include <netdb.h>
+typedef int               EIP_SOCKET;
+#define EIP_INVALID_SOCKET    (-1)
+#define EIP_SOCKERRNO         errno
+#define EIP_socket_close(S)   close(S)
+#define EIP_socket_ioctl(A,B,C) ioctl(A,B,C)
+#define EIP_SOCK_EWOULDBLOCK  EWOULDBLOCK
+#define EIP_SOCK_EINPROGRESS  EINPROGRESS
 
 #ifdef SOLARIS
 #include <sys/filio.h>
-#define INADDR_NONE (-1)
 #endif
 
 /* end of Unix settings */
 #endif
 #endif
 
-typedef int eip_bool;
-#define true  1
-#define false 0
+#include "eip_bool.h"
 
 /* This could be an application on its own...
  * Rough idea:
@@ -115,13 +111,12 @@ typedef int eip_bool;
  *  0: keep quiet
  */
 extern int EIP_verbosity;
-/* Should output go onto console
- * or into mem_string_file ?
- */
-extern eip_bool EIP_use_mem_string_file;
 
 /* print if EIP_verbosity >= level */
 void EIP_printf(int level, const char *format, ...);
+
+/* print with time stamp if EIP_verbosity >= level */
+void EIP_printf_time(int level, const char *format, ...);
 
 void EIP_hexdump(int level, const void *_data, int len);
 
@@ -148,7 +143,7 @@ void EIP_hexdump(int level, const void *_data, int len);
  *       be slightly smaller for the driver! While the command-line
  *       tool can read INT[246], the driver cannot!
  *
- * Possible conclusions: 
+ * Possible conclusions:
  * -> Total response limited to 538 bytes?
  * 538 - EncapsulationHeader(24)                              = 514
  *     - RR Data handle & timeout(6)                          = 508
@@ -166,18 +161,31 @@ void EIP_hexdump(int level, const void *_data, int len);
  * The response has an overhead of 40 bytes, see above: 24+6+10.
  * The request has an overhead of 52 bytes.
  *
- * Buffer code rejects requests > EIP_BUFFER_PANIC_THRESHOLD
- * because that's not supposed to happen.
- *
  * However, the SNS CF PLCs seem to work best with a buffer limit
  * of 500, so that's now the EIP_DEFAULT_BUFFER_LIMIT.
+ *
+ * Overall, the driver uses a buffer of EIP_BUFFER_LIMIT bytes,
+ * so nothing bigger than that can be transferred.
  */
-#define EIP_DEFAULT_BUFFER_LIMIT 500
-#define EIP_PROTOCOL_OVERHEAD 52
-#define EIP_BUFFER_PANIC_THRESHOLD 600
 
+/** Limit used by the driver when constructing requests and
+ *  watching expected responses
+ */
 extern int EIP_buffer_limit;
 
+/** Best estimate for EIP_buffer_limit */
+#define EIP_DEFAULT_BUFFER_LIMIT 500
+
+/** Used to be used to determine EIP_DEFAULT_BUFFER_LIMIT, but
+ *  didn't work out
+ */
+#define EIP_PROTOCOL_OVERHEAD 52
+
+/** Absolute maximum for EIP_buffer_limit because this is the
+ *  buffer size that the driver uses to allocate the initial
+ *  buffer.
+ */
+#define EIP_BUFFER_SIZE 600
 
 /********************************************************
  * ControlNet data types
@@ -192,8 +200,8 @@ typedef signed char    CN_SINT;
 typedef unsigned char  CN_USINT;
 typedef unsigned short CN_UINT;
 typedef short          CN_INT;
-typedef unsigned long  CN_UDINT;
-typedef long           CN_DINT;
+typedef unsigned int   CN_UDINT;
+typedef int            CN_DINT;
 typedef float          CN_REAL;
 
 typedef enum
@@ -365,7 +373,7 @@ CN_USINT *make_CM_Unconnected_Send(CN_USINT *request, size_t message_size,
  * Logix5000
  ********************************************************/
 
-/* Parses tags of the form 
+/* Parses tags of the form
  *     name.name[element].name[element].name
  * and converts them into list of path elements
  */
@@ -379,8 +387,8 @@ struct __ParsedTag
     }           type;
     union
     {
-        char    *name;
-        size_t  element;
+        char   *name;
+        size_t element;
     }           value;
     ParsedTag   *next;
 };
@@ -498,8 +506,8 @@ typedef struct
 {
     CN_UINT     command;            /* Encapsulation_Command           */
     CN_UINT     length;             /* # bytes that follow this header */
-    CN_UDINT    session;            /* returned by EC_RegisterSession  */ 
-    CN_UDINT    status;             
+    CN_UDINT    session;            /* returned by EC_RegisterSession  */
+    CN_UDINT    status;
     CN_USINT    server_context[8];  /* anything I like                 */
     CN_UDINT    options;
 }   EncapsulationHeader;
@@ -630,13 +638,12 @@ typedef struct
  * sock == 0 is used to detect unused/shutdown connections. */
 typedef struct
 {
-    SOCKET                  sock;       /* silk or nylon */
+    EIP_SOCKET              sock;       /* silk or nylon */
     int                     slot;       /* PLC's slot on backplane */
     size_t                  transfer_buffer_limit; /* PLC limit */
     size_t                  millisec_timeout; /* .. for socket calls */
     CN_UDINT                session;    /* session ID, generated by target */
-    size_t                  size;       /* size of buffer, grows if necess. */
-    CN_USINT                *buffer;    /* buffer for read/write */
+    CN_USINT                *buffer;    /* buffer for read/write, EIP_BUFFER_SIZE */
     EIPIdentityInfo         info;
     EIPConnectionParameters params;
 }   EIPConnection;
@@ -656,26 +663,40 @@ const CN_USINT *EIP_unpack_RRData(const CN_USINT *response,
 
 void EIP_dump_connection(const EIPConnection *c);
 
-/* Assert that *buffer can hold "requested" bytes.
- * A bit like realloc, but only grows and keeps old buffer
- * if no more space */
-eip_bool EIP_reserve_buffer(void **buffer, size_t *size, size_t requested);
+/** Allocate EIPConnection */
+EIPConnection *EIP_init();
 
-eip_bool EIP_send_connection_buffer(EIPConnection *c);
+/** Dispose EIPConnection */
+void EIP_dispose(EIPConnection *c);
 
-eip_bool EIP_read_connection_buffer(EIPConnection *c);
-
-/* A tad like the original strdup (not available for vxWorks),
- * but frees the original string if occupied
- * -> has to be 0-initialized */
-eip_bool EIP_strdup(char **ptr, const char *text, size_t len);
-
+/** Connect to PLC */
 eip_bool EIP_startup(EIPConnection *c,
                  const char *ip_addr, unsigned short port,
                  int slot,
                  size_t millisec_timeout);
 
+/** Disconnect from PLC */
 void EIP_shutdown(EIPConnection *c);
+
+/** Send content of buffer.
+ *  Buffer must contain valid EncapsulationHeader
+ *  which describes the size of the message.
+ *  @return true when OK
+ */
+eip_bool EIP_send_connection_buffer(EIPConnection *c);
+
+/** Read message from PLC into connection's buffer:
+ *  EncapsulationHeader, which describes the length of
+ *  the message, followed by actual message.
+ *  @return true when a full reply was received
+ */
+eip_bool EIP_read_connection_buffer(EIPConnection *c);
+
+/* VxWorks has no strdup */
+char *EIP_strdup(const char *text);
+
+/* Like EIP_strdup, but only copies the first 'len' chars */
+char *EIP_strdup_n(const char *text, size_t len);
 
 /* Read a single tag in a single CIP_ReadData request,
  * report data & data_length
