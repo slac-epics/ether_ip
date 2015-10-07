@@ -23,6 +23,7 @@ ether_ip_test_SYS_LIBS_solaris += socket
 ether_ip_test_SYS_LIBS_solaris += nsl
 
 DBD = ether_ip.dbd
+DBD += drvEtherIP.dbd
 
 LIBRARY_IOC = ether_ip
 
