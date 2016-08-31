@@ -1,4 +1,4 @@
-/* $Id: devEtherIP.c,v 1.12 2011/04/12 18:08:48 saa Exp $
+/* $Id: devEtherIP.c,v 1.14 2015/09/30 15:51:55 saa Exp $
  *
  * devEtherIP
  *
@@ -38,6 +38,7 @@
 #include <boRecord.h>
 #include <mbboRecord.h>
 #include <mbboDirectRecord.h>
+#include <stringoutRecord.h>
 #include <errlog.h>
 
 /* Local */
@@ -635,6 +636,57 @@ static void check_mbbo_direct_callback(void *arg)
         etherIP_scanOnce(rec);
 }
 
+/* Callback for stringout, see ao_callback comments */
+static void check_so_callback(void *arg)
+{
+    stringoutRecord      *rec = (stringoutRecord *) arg;
+    struct rset          *rset= (struct rset *)(rec->rset);
+    DevicePrivate        *pvt = (DevicePrivate *)rec->dpvt;
+    char                 stringval[MAX_STRING_SIZE];
+    eip_bool             process = false;
+
+    /* We are about the check and even set val -> lock */
+    dbScanLock((dbCommon *)rec);
+    if (rec->pact)
+    {
+        (*rset->process) ((dbCommon *)rec);
+        dbScanUnlock((dbCommon *)rec);
+        return;
+    }
+    /* Check if record's VAL is current */
+    if (!check_data((dbCommon *) rec))
+    {
+        (*rset->process) ((dbCommon *)rec);
+        dbScanUnlock((dbCommon *)rec);
+        return;
+    }
+    if (get_CIP_STRING(pvt->tag->data,  stringval, MAX_STRING_SIZE) &&
+        (rec->udf || rec->sevr == INVALID_ALARM || strcmp(rec->val, stringval)))
+    {
+        if (rec->tpro)
+            printf("'%s': got %s from driver\n", rec->name, stringval);
+        if (!rec->udf  &&  pvt->special & SPCO_FORCE)
+        {
+            if (rec->tpro)
+                printf("'%s': will re-write record's value %s\n",
+                       rec->name, rec->val);
+        }
+        else
+        {
+	    strcpy(rec->val, stringval);
+            rec->udf = false;
+            if (rec->tpro)
+                printf("'%s': updated record's value %s\n",
+                       rec->name, rec->val);
+        }
+        process = true;
+    }
+    dbScanUnlock((dbCommon *)rec);
+    /* Does record need processing and is not periodic? */
+    if (process && rec->scan < SCAN_1ST_PERIODIC)
+        etherIP_scanOnce(rec);
+}
+
 /* device support routine get_ioint_info */
 static long get_ioint_info(int cmd, dbCommon *rec, IOSCANPVT *ppvt)
 {
@@ -1125,6 +1177,15 @@ static long mbbo_direct_init_record(mbboDirectRecord *rec)
     long status = init_record((dbCommon *)rec, check_mbbo_direct_callback,
                               &rec->out, 1, rec->nobt);
     rec->shft = 0;
+    if (status)
+        return status;
+    return 2; /* don't convert, we have no value, yet */
+}
+
+static long so_init_record(stringoutRecord *rec)
+{
+    long status = init_record((dbCommon *)rec, check_so_callback,
+                              &rec->out, 1, 0);
     if (status)
         return status;
     return 2; /* don't convert, we have no value, yet */
@@ -1626,6 +1687,53 @@ static long mbbo_direct_write (mbboDirectRecord *rec)
     return 0;
 }
 
+static long so_write(stringoutRecord *rec)
+{
+    DevicePrivate *pvt = (DevicePrivate *)rec->dpvt;
+    long          status;
+    char          stringval[MAX_STRING_SIZE+1];
+    eip_bool      ok = true;
+
+    if (rec->pact) /* Second pass, called for write completion ? */
+    {
+        if (rec->tpro)
+            printf("'%s': written\n", rec->name);
+        rec->pact = FALSE;
+        return 0;
+    }
+    if (rec->tpro)
+        dump_DevicePrivate((dbCommon *)rec);
+    status = check_link((dbCommon *)rec, check_so_callback, &rec->out, 1, 0);
+    if (status)
+    {
+        recGblSetSevr(rec, WRITE_ALARM, INVALID_ALARM);
+        return status;
+    }
+    if (lock_data((dbCommon *)rec))
+    {   /* Check if record's VAL is current */
+	if (get_CIP_STRING(pvt->tag->data, stringval, MAX_STRING_SIZE+1) &&
+            strcmp(rec->val, stringval))
+        {
+            if (rec->tpro)
+                printf("'%s': write %s!\n", rec->name, rec->val);
+            ok = put_CIP_STRING(pvt->tag->data, rec->val, pvt->tag->data_size);
+            if (pvt->tag->do_write)
+                EIP_printf(6,"'%s': already writing\n", rec->name);
+            else
+                pvt->tag->do_write = true;
+            rec->pact=TRUE;
+        }
+        epicsMutexUnlock(pvt->tag->data_lock);
+    }
+    else
+        ok = false;
+    if (ok)
+        rec->udf = FALSE;
+    else
+        recGblSetSevr(rec, WRITE_ALARM, INVALID_ALARM);
+    return 0;
+}
+
 /* Create the device support entry tables */
 typedef struct
 {
@@ -1746,6 +1854,17 @@ DSET devMbboDirectEtherIP =
     NULL
 };
 
+DSET devSoEtherIP =
+{
+    6,
+    NULL,
+    init,
+    so_init_record,
+    NULL,
+    so_write,
+    NULL
+};
+
 #ifdef HAVE_314_API
 epicsExportAddress(dset,devAiEtherIP);
 epicsExportAddress(dset,devBiEtherIP);
@@ -1757,6 +1876,7 @@ epicsExportAddress(dset,devAoEtherIP);
 epicsExportAddress(dset,devBoEtherIP);
 epicsExportAddress(dset,devMbboEtherIP);
 epicsExportAddress(dset,devMbboDirectEtherIP);
+epicsExportAddress(dset,devSoEtherIP);
 #endif
 
 /* EOF devEtherIP.c */
