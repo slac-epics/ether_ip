@@ -1,0 +1,6 @@
+R2.26-0.1.0:     17-Mar-2017, H. Slepicka (slepicka)
+    First Version of ether_ip with the new Git Workflow.
+    Added .gitignore
+    Removed .cvsignore and .hgignore
+    Removed libs already included in EPICS_BASE_IOC_LIBS from testether_ipApp/src/Makefile
+
