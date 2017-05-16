@@ -1,12 +1,4 @@
 #RELEASE Location of external products
-# Run "gnumake clean uninstall install" in the application
-# top directory each time this file is changed.
 
-# Specify the full path to your EPICS base location
-# as well as the 'share' section where the EtherIP driver
-# is located
-
-BASE_MODULE_VERSION=R3.14.12-0.4.0
-EPICS_BASE=/reg/g/pcds/package/epics/3.14/base/$(BASE_MODULE_VERSION)
-
+-include $(TOP)/configure/RELEASE.local
 
