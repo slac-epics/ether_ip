@@ -1,3 +1,12 @@
+R2.26-1.0.0:     12-Fev-2018, Marcio P. Donadio (marcio)
+    Patches were created from SHA 1bc0487edf01cc to SHA f41d1b7e8c31 in order
+    to insert modifications made in EED compared to the collaboration branch.
+    The patch files are:
+    - Insert data size in function make_CIP_WriteData(): 
+          patches/insertDataSizeIn_make_CIP_WriteData.patch
+    - Support for stringout:
+          patches/supportForStringout.patch
+
 R2.26-0.1.0:     17-Mar-2017, H. Slepicka (slepicka)
     First Version of ether_ip with the new Git Workflow.
     Added .gitignore
