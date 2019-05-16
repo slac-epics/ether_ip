@@ -5,3 +5,14 @@ dbd/
 include/
 lib/
 O.*
+*~
+*.log
+*.swp
+cfg/
+display/
+html/
+templates/
+cdCommands
+envPaths
+RELEASE_SITE
+tags
