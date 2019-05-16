@@ -1,3 +1,7 @@
+R3.1-0.1.1  Marcio Donadio - May/16/2019
+            - Added text in readme.txt explaining stringout support. 
+            - Waveform type was missing from the table in readme.txt.
+
 R3.1-0.1.0  Marcio Donadio - May/16/2019
             - Changes to build for SLAC git workflow. No internal patches or
               changes in source code were done in this release.
