@@ -11,7 +11,7 @@
 /* TODO:
  * This works for R3.14.x, but will fail for R4.1 ...
  */
-#if EPICS_VERSION >= 3 && EPICS_REVISION >= 14
+#if EPICS_VERSION > 3 || (EPICS_VERSION == 3 && EPICS_REVISION >= 14)
 #  include "epicsMutex.h"
 #  include "epicsEvent.h"
 #  include "epicsThread.h"
